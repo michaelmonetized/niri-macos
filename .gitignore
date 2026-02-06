@@ -1,0 +1,17 @@
+# Build
+.build/
+.swiftpm/
+DerivedData/
+
+# macOS
+.DS_Store
+*.xcodeproj
+*.xcworkspace
+
+# IDE
+.idea/
+*.swp
+*~
+
+# Logs
+*.log

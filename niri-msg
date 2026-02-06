@@ -1,0 +1,97 @@
+#!/usr/bin/env swift
+
+import Foundation
+
+let socketPath = "/tmp/niri-macos.sock"
+
+func sendCommand(_ command: String) {
+    // Create socket
+    let sock = socket(AF_UNIX, SOCK_STREAM, 0)
+    guard sock >= 0 else {
+        fputs("Error: Could not create socket\n", stderr)
+        exit(1)
+    }
+    defer { close(sock) }
+    
+    // Connect to server
+    var addr = sockaddr_un()
+    addr.sun_family = sa_family_t(AF_UNIX)
+    withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
+        socketPath.withCString { cstr in
+            _ = strcpy(UnsafeMutableRawPointer(ptr).assumingMemoryBound(to: CChar.self), cstr)
+        }
+    }
+    
+    let connectResult = withUnsafePointer(to: &addr) { ptr in
+        ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockPtr in
+            connect(sock, sockPtr, socklen_t(MemoryLayout<sockaddr_un>.size))
+        }
+    }
+    
+    guard connectResult == 0 else {
+        fputs("Error: Could not connect to niri-macos (is it running?)\n", stderr)
+        exit(1)
+    }
+    
+    // Build JSON request
+    let request = "{\"command\":\"\(command)\"}"
+    
+    // Send request
+    _ = request.withCString { ptr in
+        write(sock, ptr, strlen(ptr))
+    }
+    
+    // Read response
+    var buffer = [CChar](repeating: 0, count: 4096)
+    let bytesRead = read(sock, &buffer, buffer.count - 1)
+    
+    if bytesRead > 0 {
+        buffer[bytesRead] = 0
+        let response = String(cString: buffer)
+        
+        // Parse and display response
+        if let data = response.data(using: .utf8),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            if let success = json["success"] as? Bool {
+                if success {
+                    print("OK")
+                } else if let error = json["error"] as? String {
+                    fputs("Error: \(error)\n", stderr)
+                    exit(1)
+                }
+            }
+        } else {
+            print(response)
+        }
+    }
+}
+
+// Parse arguments
+let args = CommandLine.arguments.dropFirst()
+
+guard !args.isEmpty else {
+    print("""
+    Usage: niri-msg <command>
+    
+    Commands:
+      focus-column-left      Focus the column to the left
+      focus-column-right     Focus the column to the right
+      focus-window-up        Focus the window above in column
+      focus-window-down      Focus the window below in column
+      
+      move-column-left       Move focused column left
+      move-column-right      Move focused column right
+      
+      consume-window-into-column   Merge next window into current column
+      expel-window-from-column     Split focused window to new column
+      
+      center-column          Center the focused column
+      switch-preset-column-width   Cycle through preset widths
+      
+      quit                   Stop niri-macos
+    """)
+    exit(0)
+}
+
+let command = args.joined(separator: "-")
+sendCommand(command)
