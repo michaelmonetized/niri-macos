@@ -162,11 +162,11 @@ class IPCServer {
         case .focusColumnRight:
             engine.focusColumnRight()
         case .focusColumnFirst:
-            // TODO
-            break
+            // Focus first column by scrolling to beginning
+            engine.scroll(by: -10000)  // Large scroll to beginning
         case .focusColumnLast:
-            // TODO
-            break
+            // Focus last column by scrolling to end
+            engine.scroll(by: 10000)  // Large scroll to end
         case .focusWindowUp:
             engine.focusWindowUp()
         case .focusWindowDown:
@@ -177,11 +177,9 @@ class IPCServer {
         case .moveColumnRight:
             engine.moveColumnRight()
         case .moveWindowUp:
-            // TODO
-            break
+            engine.moveWindowUp()
         case .moveWindowDown:
-            // TODO
-            break
+            engine.moveWindowDown()
             
         case .consumeWindow:
             engine.consumeWindowIntoColumn()
@@ -191,17 +189,79 @@ class IPCServer {
         case .centerColumn:
             engine.centerColumn()
         case .maximizeColumn:
-            // TODO
-            break
+            engine.maximizeColumn()
         case .switchPresetWidth:
             engine.switchPresetColumnWidth()
+        case .setColumnWidth:
+            if let widthSpec = request.args?["width"] ?? request.args?["arg0"] {
+                engine.setColumnWidth(widthSpec)
+            } else {
+                return IPCResponse(success: false, error: "Missing width argument", data: nil)
+            }
+            
+        case .scrollWorkspace:
+            if let deltaStr = request.args?["delta"] ?? request.args?["arg0"],
+               let delta = Double(deltaStr) {
+                engine.scroll(by: CGFloat(delta))
+            } else {
+                return IPCResponse(success: false, error: "Missing or invalid delta argument", data: nil)
+            }
             
         case .focusWorkspace:
-            // TODO
-            break
+            if let wsStr = request.args?["workspace"] ?? request.args?["arg0"],
+               let wsIndex = Int(wsStr) {
+                engine.focusWorkspace(wsIndex)
+            } else {
+                return IPCResponse(success: false, error: "Missing workspace index", data: nil)
+            }
         case .moveToWorkspace:
-            // TODO
-            break
+            if let wsStr = request.args?["workspace"] ?? request.args?["arg0"],
+               let wsIndex = Int(wsStr) {
+                engine.moveWindowToWorkspace(wsIndex)
+            } else {
+                return IPCResponse(success: false, error: "Missing workspace index", data: nil)
+            }
+        case .workspaceUp:
+            engine.workspaceUp()
+        case .workspaceDown:
+            engine.workspaceDown()
+        case .createWorkspaceAbove:
+            engine.createWorkspaceAbove()
+        case .createWorkspaceBelow:
+            engine.createWorkspaceBelow()
+            
+        case .toggleFullscreen:
+            engine.toggleFullscreen()
+            
+        // Split groups
+        case .createSplitHorizontal:
+            engine.createSplitGroup(.horizontal)
+        case .createSplitVertical:
+            engine.createSplitGroup(.vertical)
+        case .createSplitQuad:
+            engine.createSplitGroup(.quad)
+            
+        case .listWindows:
+            let windows = engine.listWindows()
+            // Convert to simple string dict for JSON encoding
+            var data: [String: String] = [:]
+            for (i, window) in windows.enumerated() {
+                let id = window["id"] as? UInt32 ?? 0
+                let app = window["app"] as? String ?? "?"
+                let title = window["title"] as? String ?? ""
+                let focused = window["focused"] as? Bool ?? false
+                let col = window["column"] as? Int ?? 0
+                data["window_\(i)"] = "\(id): [\(col)] \(app) - \(title)\(focused ? " *" : "")"
+            }
+            return IPCResponse(success: true, error: nil, data: data)
+            
+        case .status:
+            let status = engine.getStatus()
+            var data: [String: String] = [:]
+            for (key, value) in status {
+                data[key] = "\(value)"
+            }
+            return IPCResponse(success: true, error: nil, data: data)
             
         case .quit:
             DispatchQueue.main.async {

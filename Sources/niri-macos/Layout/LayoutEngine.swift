@@ -104,7 +104,7 @@ class LayoutEngine {
         let usableHeight = frame.height - config.outerGaps.top - config.outerGaps.bottom
         let usableWidth = frame.width - config.outerGaps.left - config.outerGaps.right
         
-        for (colIndex, column) in workspace.columns.enumerated() {
+        for (_, column) in workspace.columns.enumerated() {
             let columnWidth = column.width.resolve(in: usableWidth, gaps: config.gaps)
             
             // Calculate height for each window in column (split evenly)
@@ -143,7 +143,25 @@ class LayoutEngine {
                 
                 if frame.maxX >= viewportLeft && frame.minX <= viewportRight {
                     // Window is at least partially visible
-                    _ = windowController.setWindowFrame(windowID, frame: frame)
+                    // CLIP the frame to monitor boundaries to prevent bleed-over
+                    var clippedFrame = frame
+                    
+                    // Clip left edge
+                    if clippedFrame.minX < viewportLeft {
+                        let overhang = viewportLeft - clippedFrame.minX
+                        clippedFrame.origin.x = viewportLeft
+                        clippedFrame.size.width -= overhang
+                    }
+                    
+                    // Clip right edge
+                    if clippedFrame.maxX > viewportRight {
+                        clippedFrame.size.width = viewportRight - clippedFrame.origin.x
+                    }
+                    
+                    // Only apply if window still has reasonable width
+                    if clippedFrame.width >= 100 {
+                        _ = windowController.setWindowFrame(windowID, frame: clippedFrame)
+                    }
                 }
             }
         }
@@ -191,7 +209,7 @@ class LayoutEngine {
         guard let (monitorIdx, _) = getActiveContext() else { return }
         
         var ws = monitors[monitorIdx].activeWorkspace
-        guard let col = ws.focusedColumn, ws.focusedWindowIndex > 0 else { return }
+        guard ws.focusedColumn != nil, ws.focusedWindowIndex > 0 else { return }
         
         ws.focusedWindowIndex -= 1
         monitors[monitorIdx].activeWorkspace = ws
@@ -290,6 +308,131 @@ class LayoutEngine {
         applyLayout()
     }
     
+    // MARK: - Split Group Operations
+    
+    /// Create a split group from the focused column
+    /// This converts a column with multiple windows into a centered split group
+    func createSplitGroup(_ layout: SplitGroupLayout) {
+        guard let (monitorIdx, _) = getActiveContext() else { return }
+        
+        var ws = monitors[monitorIdx].activeWorkspace
+        guard ws.focusedColumnIndex < ws.columns.count else { return }
+        
+        let column = ws.columns[ws.focusedColumnIndex]
+        let requiredCount: Int
+        switch layout {
+        case .horizontal, .vertical: requiredCount = 2
+        case .quad: requiredCount = 4
+        }
+        
+        // If current column doesn't have enough windows, consume from adjacent columns
+        var windowsForSplit: [WindowID] = Array(column.windowIDs.prefix(requiredCount))
+        
+        // Try to get more windows from next columns if needed
+        var nextColIdx = ws.focusedColumnIndex + 1
+        while windowsForSplit.count < requiredCount && nextColIdx < ws.columns.count {
+            let needed = requiredCount - windowsForSplit.count
+            let available = ws.columns[nextColIdx].windowIDs.prefix(needed)
+            windowsForSplit.append(contentsOf: available)
+            
+            // Remove consumed windows from next column
+            for _ in 0..<available.count {
+                ws.columns[nextColIdx].windowIDs.removeFirst()
+            }
+            
+            // Remove empty column
+            if ws.columns[nextColIdx].isEmpty {
+                ws.columns.remove(at: nextColIdx)
+            } else {
+                nextColIdx += 1
+            }
+        }
+        
+        guard windowsForSplit.count >= 2 else {
+            logger.info("Not enough windows to create split group (need at least 2)")
+            return
+        }
+        
+        // Update current column with split group windows
+        ws.columns[ws.focusedColumnIndex].windowIDs = windowsForSplit
+        
+        // Set width to full screen for centered view
+        ws.columns[ws.focusedColumnIndex].width = .proportion(1.0)
+        
+        monitors[monitorIdx].activeWorkspace = ws
+        
+        logger.info("Created \(layout.rawValue) split group with \(windowsForSplit.count) windows")
+        
+        // Apply special split layout
+        applySplitLayout(monitorIndex: monitorIdx, columnIndex: ws.focusedColumnIndex, layout: layout)
+    }
+    
+    /// Apply split group layout to windows in a column
+    private func applySplitLayout(monitorIndex: Int, columnIndex: Int, layout: SplitGroupLayout) {
+        let monitor = monitors[monitorIndex]
+        let ws = monitor.activeWorkspace
+        guard columnIndex < ws.columns.count else { return }
+        
+        let column = ws.columns[columnIndex]
+        let frame = monitor.frame
+        let gaps = config.gaps
+        let outerGaps = config.outerGaps
+        
+        let usableWidth = frame.width - outerGaps.left - outerGaps.right
+        let usableHeight = frame.height - outerGaps.top - outerGaps.bottom
+        
+        var windowFrames: [(WindowID, CGRect)] = []
+        
+        switch layout {
+        case .horizontal:
+            // 2 windows side by side
+            let windowWidth = (usableWidth - gaps) / 2
+            for (i, windowID) in column.windowIDs.prefix(2).enumerated() {
+                let x = frame.origin.x + outerGaps.left + (CGFloat(i) * (windowWidth + gaps))
+                let windowFrame = CGRect(
+                    x: x,
+                    y: frame.origin.y + outerGaps.top,
+                    width: windowWidth,
+                    height: usableHeight
+                )
+                windowFrames.append((windowID, windowFrame))
+            }
+            
+        case .vertical:
+            // 2 windows stacked
+            let windowHeight = (usableHeight - gaps) / 2
+            for (i, windowID) in column.windowIDs.prefix(2).enumerated() {
+                let y = frame.origin.y + outerGaps.top + (CGFloat(i) * (windowHeight + gaps))
+                let windowFrame = CGRect(
+                    x: frame.origin.x + outerGaps.left,
+                    y: y,
+                    width: usableWidth,
+                    height: windowHeight
+                )
+                windowFrames.append((windowID, windowFrame))
+            }
+            
+        case .quad:
+            // 4 windows in 2x2 grid
+            let windowWidth = (usableWidth - gaps) / 2
+            let windowHeight = (usableHeight - gaps) / 2
+            let positions: [(Int, Int)] = [(0, 0), (1, 0), (0, 1), (1, 1)]
+            
+            for (i, windowID) in column.windowIDs.prefix(4).enumerated() {
+                let (col, row) = positions[i]
+                let x = frame.origin.x + outerGaps.left + (CGFloat(col) * (windowWidth + gaps))
+                let y = frame.origin.y + outerGaps.top + (CGFloat(row) * (windowHeight + gaps))
+                let windowFrame = CGRect(x: x, y: y, width: windowWidth, height: windowHeight)
+                windowFrames.append((windowID, windowFrame))
+            }
+        }
+        
+        // Apply the frames
+        for (windowID, windowFrame) in windowFrames {
+            _ = windowController.setWindowFrame(windowID, frame: windowFrame)
+        }
+    }
+    
     // MARK: - Size Operations
     
     func switchPresetColumnWidth() {
@@ -335,6 +478,254 @@ class LayoutEngine {
         applyLayout()
     }
     
+    func maximizeColumn() {
+        guard let (monitorIdx, _) = getActiveContext() else { return }
+        
+        var ws = monitors[monitorIdx].activeWorkspace
+        guard ws.focusedColumnIndex < ws.columns.count else { return }
+        
+        ws.columns[ws.focusedColumnIndex].width = .proportion(1.0)
+        monitors[monitorIdx].activeWorkspace = ws
+        applyLayout()
+    }
+    
+    func setColumnWidth(_ widthSpec: String) {
+        guard let (monitorIdx, _) = getActiveContext() else { return }
+        
+        var ws = monitors[monitorIdx].activeWorkspace
+        guard ws.focusedColumnIndex < ws.columns.count else { return }
+        
+        let monitor = monitors[monitorIdx]
+        let usableWidth = monitor.frame.width - config.outerGaps.left - config.outerGaps.right
+        
+        // Parse width spec: "+10%", "-50", "0.5", "500"
+        var spec = widthSpec.trimmingCharacters(in: .whitespaces)
+        let isRelative = spec.hasPrefix("+") || spec.hasPrefix("-")
+        let isPercent = spec.hasSuffix("%")
+        
+        if isPercent {
+            spec = String(spec.dropLast())
+        }
+        
+        guard let value = Double(spec) else {
+            logger.error("Invalid width spec: \(widthSpec)")
+            return
+        }
+        
+        let currentWidth = ws.columns[ws.focusedColumnIndex].width.resolve(in: usableWidth, gaps: config.gaps)
+        
+        let newWidth: ColumnWidth
+        if isPercent {
+            let proportion = CGFloat(value) / 100.0
+            if isRelative {
+                let currentProportion = currentWidth / usableWidth
+                newWidth = .proportion(max(0.1, min(1.0, currentProportion + proportion)))
+            } else {
+                newWidth = .proportion(max(0.1, min(1.0, proportion)))
+            }
+        } else {
+            let pixels = CGFloat(value)
+            if isRelative {
+                newWidth = .fixed(max(100, currentWidth + pixels))
+            } else {
+                newWidth = .fixed(max(100, pixels))
+            }
+        }
+        
+        ws.columns[ws.focusedColumnIndex].width = newWidth
+        monitors[monitorIdx].activeWorkspace = ws
+        applyLayout()
+    }
+    
+    func toggleFullscreen() {
+        guard let (monitorIdx, _) = getActiveContext() else { return }
+        
+        let ws = monitors[monitorIdx].activeWorkspace
+        guard ws.focusedColumnIndex < ws.columns.count else { return }
+        
+        let currentWidth = ws.columns[ws.focusedColumnIndex].width
+        
+        // Toggle between current width and 100%
+        if case .proportion(let p) = currentWidth, p >= 0.99 {
+            // Currently maximized, restore to default
+            monitors[monitorIdx].activeWorkspace.columns[ws.focusedColumnIndex].width = config.defaultWidth
+        } else {
+            // Maximize
+            monitors[monitorIdx].activeWorkspace.columns[ws.focusedColumnIndex].width = .proportion(1.0)
+        }
+        
+        applyLayout()
+    }
+    
+    // MARK: - Move Window Within Column
+    
+    func moveWindowUp() {
+        guard let (monitorIdx, _) = getActiveContext() else { return }
+        
+        var ws = monitors[monitorIdx].activeWorkspace
+        guard ws.focusedColumnIndex < ws.columns.count,
+              ws.focusedWindowIndex > 0 else { return }
+        
+        let idx = ws.focusedWindowIndex
+        ws.columns[ws.focusedColumnIndex].windowIDs.swapAt(idx, idx - 1)
+        ws.focusedWindowIndex -= 1
+        monitors[monitorIdx].activeWorkspace = ws
+        
+        applyLayout()
+    }
+    
+    func moveWindowDown() {
+        guard let (monitorIdx, _) = getActiveContext() else { return }
+        
+        var ws = monitors[monitorIdx].activeWorkspace
+        guard ws.focusedColumnIndex < ws.columns.count,
+              ws.focusedWindowIndex < ws.columns[ws.focusedColumnIndex].windowIDs.count - 1 else { return }
+        
+        let idx = ws.focusedWindowIndex
+        ws.columns[ws.focusedColumnIndex].windowIDs.swapAt(idx, idx + 1)
+        ws.focusedWindowIndex += 1
+        monitors[monitorIdx].activeWorkspace = ws
+        
+        applyLayout()
+    }
+    
+    // MARK: - Workspace Operations
+    
+    func workspaceUp() {
+        guard let (monitorIdx, _) = getActiveContext() else { return }
+        
+        let currentIdx = monitors[monitorIdx].activeWorkspaceIndex
+        if currentIdx > 0 {
+            monitors[monitorIdx].activeWorkspaceIndex = currentIdx - 1
+            logger.info("Switched to workspace \(monitors[monitorIdx].activeWorkspaceIndex + 1)")
+            applyLayout()
+        }
+    }
+    
+    func workspaceDown() {
+        guard let (monitorIdx, _) = getActiveContext() else { return }
+        
+        let currentIdx = monitors[monitorIdx].activeWorkspaceIndex
+        
+        // Create new workspace if needed
+        if currentIdx >= monitors[monitorIdx].workspaces.count - 1 {
+            let newWorkspace = Workspace(id: monitors[monitorIdx].workspaces.count + 1)
+            monitors[monitorIdx].workspaces.append(newWorkspace)
+        }
+        
+        monitors[monitorIdx].activeWorkspaceIndex = currentIdx + 1
+        logger.info("Switched to workspace \(monitors[monitorIdx].activeWorkspaceIndex + 1)")
+        applyLayout()
+    }
+    
+    /// Create a new workspace BELOW the current one and switch to it
+    func createWorkspaceBelow() {
+        guard let (monitorIdx, _) = getActiveContext() else { return }
+        
+        let currentIdx = monitors[monitorIdx].activeWorkspaceIndex
+        
+        // Create new workspace and insert it after current
+        let newWorkspace = Workspace(id: 0)  // ID will be reassigned
+        monitors[monitorIdx].workspaces.insert(newWorkspace, at: currentIdx + 1)
+        
+        // Reassign workspace IDs to maintain order
+        for i in monitors[monitorIdx].workspaces.indices {
+            monitors[monitorIdx].workspaces[i] = Workspace(
+                id: i + 1,
+                columns: monitors[monitorIdx].workspaces[i].columns,
+                scrollOffset: monitors[monitorIdx].workspaces[i].scrollOffset,
+                focusedColumnIndex: monitors[monitorIdx].workspaces[i].focusedColumnIndex,
+                focusedWindowIndex: monitors[monitorIdx].workspaces[i].focusedWindowIndex
+            )
+        }
+        
+        // Switch to the new workspace
+        monitors[monitorIdx].activeWorkspaceIndex = currentIdx + 1
+        logger.info("Created workspace below, now on workspace \(currentIdx + 2)")
+        applyLayout()
+    }
+    
+    /// Create a new workspace ABOVE the current one and switch to it
+    func createWorkspaceAbove() {
+        guard let (monitorIdx, _) = getActiveContext() else { return }
+        
+        let currentIdx = monitors[monitorIdx].activeWorkspaceIndex
+        
+        // Create new workspace and insert it before current
+        let newWorkspace = Workspace(id: 0)  // ID will be reassigned
+        monitors[monitorIdx].workspaces.insert(newWorkspace, at: currentIdx)
+        
+        // Reassign workspace IDs to maintain order
+        for i in monitors[monitorIdx].workspaces.indices {
+            monitors[monitorIdx].workspaces[i] = Workspace(
+                id: i + 1,
+                columns: monitors[monitorIdx].workspaces[i].columns,
+                scrollOffset: monitors[monitorIdx].workspaces[i].scrollOffset,
+                focusedColumnIndex: monitors[monitorIdx].workspaces[i].focusedColumnIndex,
+                focusedWindowIndex: monitors[monitorIdx].workspaces[i].focusedWindowIndex
+            )
+        }
+        
+        // Stay on the same index (which is now the new workspace)
+        // currentIdx now points to the new workspace since we inserted before it
+        logger.info("Created workspace above, now on workspace \(currentIdx + 1)")
+        applyLayout()
+    }
+    
+    func focusWorkspace(_ index: Int) {
+        guard let (monitorIdx, _) = getActiveContext() else { return }
+        
+        // Ensure workspace exists (1-indexed from user)
+        let wsIndex = index - 1
+        guard wsIndex >= 0 else { return }
+        
+        while monitors[monitorIdx].workspaces.count <= wsIndex {
+            let newWorkspace = Workspace(id: monitors[monitorIdx].workspaces.count + 1)
+            monitors[monitorIdx].workspaces.append(newWorkspace)
+        }
+        
+        monitors[monitorIdx].activeWorkspaceIndex = wsIndex
+        logger.info("Focused workspace \(index)")
+        applyLayout()
+    }
+    
+    func moveWindowToWorkspace(_ index: Int) {
+        guard let (monitorIdx, _) = getActiveContext() else { return }
+        
+        var ws = monitors[monitorIdx].activeWorkspace
+        guard let windowID = ws.focusedWindowID,
+              ws.focusedColumnIndex < ws.columns.count else { return }
+        
+        // Remove window from current column
+        ws.columns[ws.focusedColumnIndex].windowIDs.remove(at: ws.focusedWindowIndex)
+        
+        // Remove empty column
+        if ws.columns[ws.focusedColumnIndex].isEmpty {
+            ws.columns.remove(at: ws.focusedColumnIndex)
+            if ws.focusedColumnIndex > 0 {
+                ws.focusedColumnIndex -= 1
+            }
+        }
+        ws.focusedWindowIndex = 0
+        monitors[monitorIdx].activeWorkspace = ws
+        
+        // Ensure target workspace exists (1-indexed)
+        let targetIdx = index - 1
+        guard targetIdx >= 0 else { return }
+        
+        while monitors[monitorIdx].workspaces.count <= targetIdx {
+            let newWorkspace = Workspace(id: monitors[monitorIdx].workspaces.count + 1)
+            monitors[monitorIdx].workspaces.append(newWorkspace)
+        }
+        
+        // Add window to target workspace
+        let newColumn = Column(windowIDs: [windowID], width: config.defaultWidth)
+        monitors[monitorIdx].workspaces[targetIdx].columns.append(newColumn)
+        
+        logger.info("Moved window \(windowID) to workspace \(index)")
+        applyLayout()
+    }
+    
     // MARK: - Scroll Operations
     
     func scroll(by delta: CGFloat) {
@@ -373,14 +764,185 @@ class LayoutEngine {
         }
     }
     
+    // MARK: - Window Management
+    
+    /// Add a newly discovered window to the layout
+    func addWindow(_ windowID: WindowID) {
+        // Check if already tracked
+        guard windowRegistry[windowID] == nil else { return }
+        
+        // Get window info
+        guard let window = windowEnumerator.getWindow(id: windowID) else { return }
+        
+        windowRegistry[windowID] = window
+        
+        // Determine which monitor the window is on based on its current position
+        let windowCenter = CGPoint(
+            x: window.frame.midX,
+            y: window.frame.midY
+        )
+        
+        // Find the monitor containing the window's center
+        var targetMonitorIdx = 0
+        for (idx, monitor) in monitors.enumerated() {
+            if monitor.frame.contains(windowCenter) {
+                targetMonitorIdx = idx
+                break
+            }
+        }
+        
+        addWindowToWorkspace(windowID, monitor: targetMonitorIdx)
+        applyLayout()
+    }
+    
+    /// Remove a window from the layout
+    func removeWindow(_ windowID: WindowID) {
+        windowRegistry.removeValue(forKey: windowID)
+        floatingWindows.remove(windowID)
+        
+        // Remove from all workspaces
+        for i in monitors.indices {
+            for j in monitors[i].workspaces.indices {
+                for k in monitors[i].workspaces[j].columns.indices.reversed() {
+                    monitors[i].workspaces[j].columns[k].windowIDs.removeAll { $0 == windowID }
+                    if monitors[i].workspaces[j].columns[k].isEmpty {
+                        monitors[i].workspaces[j].columns.remove(at: k)
+                    }
+                }
+            }
+        }
+        
+        applyLayout()
+    }
+    
+    /// Sync focus state when a window is focused externally
+    func syncFocus(to windowID: WindowID) {
+        // Find the window in our layout
+        for (mi, monitor) in monitors.enumerated() {
+            for (wi, workspace) in monitor.workspaces.enumerated() {
+                for (ci, column) in workspace.columns.enumerated() {
+                    if let windowIdx = column.windowIDs.firstIndex(of: windowID) {
+                        // Switch to this workspace and focus
+                        monitors[mi].activeWorkspaceIndex = wi
+                        monitors[mi].activeWorkspace.focusedColumnIndex = ci
+                        monitors[mi].activeWorkspace.focusedWindowIndex = windowIdx
+                        scrollToFocus(monitorIndex: mi)
+                        return
+                    }
+                }
+            }
+        }
+    }
+    
+    /// Refresh window list and layout
+    func refresh() {
+        discoverWindows()
+        applyLayout()
+    }
+    
+    // MARK: - Query Operations
+    
+    /// Get list of all windows for debugging
+    func listWindows() -> [[String: Any]] {
+        var result: [[String: Any]] = []
+        
+        for (mi, monitor) in monitors.enumerated() {
+            let ws = monitor.activeWorkspace
+            for (ci, column) in ws.columns.enumerated() {
+                for (wi, windowID) in column.windowIDs.enumerated() {
+                    let window = windowRegistry[windowID]
+                    let isFocused = ci == ws.focusedColumnIndex && wi == ws.focusedWindowIndex
+                    
+                    result.append([
+                        "id": windowID,
+                        "app": window?.appName ?? "Unknown",
+                        "title": window?.title ?? "",
+                        "column": ci,
+                        "index": wi,
+                        "focused": isFocused,
+                        "monitor": mi,
+                        "workspace": monitor.activeWorkspaceIndex + 1
+                    ])
+                }
+            }
+        }
+        
+        return result
+    }
+    
+    /// Get current status for debugging
+    func getStatus() -> [String: Any] {
+        guard let (monitorIdx, _) = getActiveContext() else {
+            return ["error": "No monitors"]
+        }
+        
+        let monitor = monitors[monitorIdx]
+        let ws = monitor.activeWorkspace
+        
+        // Build monitor info
+        var monitorInfo: [[String: Any]] = []
+        for (idx, m) in monitors.enumerated() {
+            monitorInfo.append([
+                "index": idx,
+                "displayID": m.displayID,
+                "frame": "\(Int(m.frame.origin.x)),\(Int(m.frame.origin.y)) \(Int(m.frame.width))x\(Int(m.frame.height))",
+                "workspaces": m.workspaces.count,
+                "activeWorkspace": m.activeWorkspaceIndex + 1,
+                "columns": m.activeWorkspace.columns.count
+            ])
+        }
+        
+        return [
+            "monitors": monitors.count,
+            "activeMonitor": monitorIdx,
+            "monitorDetails": monitorInfo,
+            "workspace": ws.id,
+            "workspaceCount": monitor.workspaces.count,
+            "columns": ws.columns.count,
+            "focusedColumn": ws.focusedColumnIndex,
+            "focusedWindow": ws.focusedWindowIndex,
+            "focusedWindowID": ws.focusedWindowID ?? 0,
+            "scrollOffset": ws.scrollOffset,
+            "totalWindows": windowRegistry.count
+        ]
+    }
+    
     // MARK: - Helpers
     
-    /// Get current active monitor and workspace indices
+    /// Get current active monitor and workspace indices based on mouse position
     private func getActiveContext() -> (Int, Int)? {
-        // For now, just use the first monitor
-        // TODO: Determine based on focused window or mouse position
         guard !monitors.isEmpty else { return nil }
+        
+        // Get current mouse location
+        let mouseLocation = NSEvent.mouseLocation
+        
+        // Convert to screen coordinates (NSEvent uses bottom-left origin)
+        // Find which monitor contains the mouse
+        for (index, monitor) in monitors.enumerated() {
+            // NSScreen.frame uses bottom-left origin, need to check if mouse is within
+            if monitor.frame.contains(mouseLocation) {
+                return (index, monitor.activeWorkspaceIndex)
+            }
+        }
+        
+        // Fallback: use primary monitor (index 0)
+        // This handles edge cases where mouse might be between screens
         return (0, monitors[0].activeWorkspaceIndex)
+    }
+    
+    /// Get monitor index for a specific display ID
+    func getMonitorIndex(for displayID: CGDirectDisplayID) -> Int? {
+        return monitors.firstIndex(where: { $0.displayID == displayID })
+    }
+    
+    /// Get monitor index at a specific screen point
+    func getMonitorIndex(at point: CGPoint) -> Int? {
+        for (index, monitor) in monitors.enumerated() {
+            if monitor.frame.contains(point) {
+                return index
+            }
+        }
+        return nil
     }
     
     /// Debug: print current state
@@ -392,6 +954,10 @@ class LayoutEngine {
             logger.info("  Workspace \(ws.id): scroll=\(ws.scrollOffset), focus=(\(ws.focusedColumnIndex), \(ws.focusedWindowIndex))")
             for (j, col) in ws.columns.enumerated() {
                 logger.info("    Column \(j): \(col.windowIDs.count) windows, width=\(col.width)")
+                for windowID in col.windowIDs {
+                    let window = windowRegistry[windowID]
+                    logger.info("      - \(windowID): \(window?.appName ?? "?") - \(window?.title ?? "")")
+                }
             }
         }
     }

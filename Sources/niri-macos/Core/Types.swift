@@ -54,8 +54,32 @@ struct Column: Identifiable {
     var windowCount: Int { windowIDs.count }
 }
 
+// MARK: - Split Group Types
+
+enum SplitGroupLayout: String, Codable {
+    case horizontal   // 2 windows side by side (50/50)
+    case vertical     // 2 windows stacked (50/50)
+    case quad         // 4 windows in 2x2 grid (25% each)
+}
+
+struct SplitGroup: Identifiable {
+    let id = UUID()
+    var layout: SplitGroupLayout
+    var windowIDs: [WindowID]  // 2 for horizontal/vertical, 4 for quad
+    var width: ColumnWidth     // Width of the entire split group in the layout
+    
+    var isEmpty: Bool { windowIDs.isEmpty }
+    var requiredWindowCount: Int {
+        switch layout {
+        case .horizontal, .vertical: return 2
+        case .quad: return 4
+        }
+    }
+    var isFull: Bool { windowIDs.count >= requiredWindowCount }
+}
+
 struct Workspace: Identifiable {
-    let id: Int
+    var id: Int
     var columns: [Column]
     var scrollOffset: CGFloat  // X position of viewport left edge in infinite strip
     var focusedColumnIndex: Int
@@ -67,6 +91,14 @@ struct Workspace: Identifiable {
         self.scrollOffset = 0
         self.focusedColumnIndex = 0
         self.focusedWindowIndex = 0
+    }
+    
+    init(id: Int, columns: [Column], scrollOffset: CGFloat, focusedColumnIndex: Int, focusedWindowIndex: Int) {
+        self.id = id
+        self.columns = columns
+        self.scrollOffset = scrollOffset
+        self.focusedColumnIndex = focusedColumnIndex
+        self.focusedWindowIndex = focusedWindowIndex
     }
     
     var focusedColumn: Column? {
@@ -163,9 +195,26 @@ enum IPCCommand: String, Codable {
     case centerColumn = "center-column"
     case maximizeColumn = "maximize-column"
     case switchPresetWidth = "switch-preset-column-width"
+    case setColumnWidth = "set-column-width"
+    
+    case scrollWorkspace = "scroll-workspace"
     
     case focusWorkspace = "focus-workspace"
     case moveToWorkspace = "move-window-to-workspace"
+    case workspaceUp = "workspace-up"
+    case workspaceDown = "workspace-down"
+    case createWorkspaceAbove = "create-workspace-above"
+    case createWorkspaceBelow = "create-workspace-below"
+    
+    case toggleFullscreen = "toggle-fullscreen"
+    
+    // Split groups
+    case createSplitHorizontal = "create-split-horizontal"
+    case createSplitVertical = "create-split-vertical"
+    case createSplitQuad = "create-split-quad"
+    
+    case listWindows = "list-windows"
+    case status = "status"
     
     case quit = "quit"
 }

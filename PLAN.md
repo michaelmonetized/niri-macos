@@ -10,25 +10,25 @@
 
 ---
 
-## Phase 1: Window Observation
+## Phase 1: Window Observation ✅
 **Goal:** Track all windows and their state changes
 
-### 1.1 Window Enumeration
-- [ ] Use CGWindowListCopyWindowInfo for window list
-- [ ] Filter to standard windows (no menus, tooltips)
-- [ ] Track window ID, app, title, frame, space
+### 1.1 Window Enumeration ✅
+- [x] Use CGWindowListCopyWindowInfo for window list
+- [x] Filter to standard windows (no menus, tooltips)
+- [x] Track window ID, app, title, frame, space
 
-### 1.2 Accessibility Observer
-- [ ] Create AXObserver for each running app
-- [ ] Subscribe to: created, destroyed, moved, resized, focused
-- [ ] Map AXUIElement ↔ CGWindowID
+### 1.2 Accessibility Observer ✅
+- [x] Create AXObserver for each running app
+- [x] Subscribe to: created, destroyed, moved, resized, focused
+- [x] Map AXUIElement ↔ CGWindowID
 
 ### 1.3 Space Detection
 - [ ] Use CGSCopyManagedDisplaySpaces (private API)
 - [ ] Track which windows are on which space
 - [ ] Detect space switches
 
-### 1.4 Window Model
+### 1.4 Window Model ✅
 ```swift
 struct ManagedWindow {
     let id: CGWindowID
@@ -42,14 +42,14 @@ struct ManagedWindow {
 }
 ```
 
-**Deliverable:** Can log all window changes in real-time
+**Deliverable:** Can log all window changes in real-time ✅
 
 ---
 
-## Phase 2: Layout Engine
+## Phase 2: Layout Engine ✅
 **Goal:** Implement niri's scrolling layout model
 
-### 2.1 Data Structures
+### 2.1 Data Structures ✅
 ```swift
 struct Column {
     var windows: [ManagedWindow]
@@ -76,40 +76,40 @@ struct Monitor {
 }
 ```
 
-### 2.2 Layout Calculation
-- [ ] Calculate visible columns based on scrollOffset
-- [ ] Determine target frames for each window
-- [ ] Handle gaps and margins
-- [ ] Implement focus-follows-scroll
+### 2.2 Layout Calculation ✅
+- [x] Calculate visible columns based on scrollOffset
+- [x] Determine target frames for each window
+- [x] Handle gaps and margins
+- [x] Implement focus-follows-scroll
 
-### 2.3 Focus Management
-- [ ] Track focused column and window
-- [ ] Implement focus-column-left/right
-- [ ] Implement focus-window-up/down
-- [ ] Auto-scroll to keep focus visible
+### 2.3 Focus Management ✅
+- [x] Track focused column and window
+- [x] Implement focus-column-left/right
+- [x] Implement focus-window-up/down
+- [x] Auto-scroll to keep focus visible
 
-### 2.4 Layout Operations
-- [ ] Insert window (always at end, or after focus)
-- [ ] Remove window (close gap)
-- [ ] Move column left/right
-- [ ] Move window up/down within column
-- [ ] Consume window into column (stacking)
-- [ ] Expel window from column
+### 2.4 Layout Operations ✅
+- [x] Insert window (always at end, or after focus)
+- [x] Remove window (close gap)
+- [x] Move column left/right
+- [x] Move window up/down within column
+- [x] Consume window into column (stacking)
+- [x] Expel window from column
 
-**Deliverable:** Layout engine calculates correct positions
+**Deliverable:** Layout engine calculates correct positions ✅
 
 ---
 
-## Phase 3: Window Control
+## Phase 3: Window Control ✅
 **Goal:** Actually move and resize windows
 
-### 3.1 AXUIElement Manipulation
-- [ ] Set AXPosition attribute
-- [ ] Set AXSize attribute
-- [ ] Handle windows that resist sizing
-- [ ] Batch updates for performance
+### 3.1 AXUIElement Manipulation ✅
+- [x] Set AXPosition attribute
+- [x] Set AXSize attribute
+- [x] Handle windows that resist sizing
+- [x] Batch updates for performance
 
-### 3.2 Animation System
+### 3.2 Animation System ✅
 ```swift
 struct SpringAnimation {
     var damping: CGFloat
@@ -130,45 +130,45 @@ class AnimationController {
 }
 ```
 
-### 3.3 Smooth Scrolling
-- [ ] Animate scrollOffset changes
-- [ ] Spring physics for natural feel
-- [ ] Momentum for swipe gestures
+### 3.3 Smooth Scrolling ✅
+- [x] Animate scrollOffset changes
+- [x] Spring physics for natural feel
+- [x] Momentum for swipe gestures
 
-**Deliverable:** Windows animate smoothly to positions
+**Deliverable:** Windows animate smoothly to positions ✅
 
 ---
 
-## Phase 4: Input Handling
+## Phase 4: Input Handling ✅
 **Goal:** Respond to gestures and commands
 
-### 4.1 Gesture Recognition
-- [ ] CGEventTap for trackpad events
-- [ ] Detect 3-finger horizontal swipe
-- [ ] Convert swipe delta to scroll offset
-- [ ] Momentum physics after release
+### 4.1 Gesture Recognition ✅
+- [x] CGEventTap for trackpad events
+- [x] Detect horizontal swipe
+- [x] Convert swipe delta to scroll offset
+- [x] Momentum physics after release
 
-### 4.2 Keyboard Shortcuts (via skhd)
-- [ ] No built-in hotkeys (use skhd)
-- [ ] Document recommended bindings
+### 4.2 Keyboard Shortcuts (via skhd) ✅
+- [x] No built-in hotkeys (use skhd)
+- [x] Document recommended bindings
 
 ### 4.3 Mouse Handling
-- [ ] Modifier+scroll to scroll workspace
+- [x] Modifier+scroll to scroll workspace
 - [ ] Modifier+drag to rearrange columns
 
-**Deliverable:** Can scroll with trackpad gestures
+**Deliverable:** Can scroll with trackpad gestures ✅
 
 ---
 
-## Phase 5: IPC Server
+## Phase 5: IPC Server ✅
 **Goal:** External control via socket
 
-### 5.1 Socket Server
-- [ ] Unix domain socket at /tmp/niri-macos.sock
-- [ ] JSON message protocol
-- [ ] Request/response pattern
+### 5.1 Socket Server ✅
+- [x] Unix domain socket at /tmp/niri-macos.sock
+- [x] JSON message protocol
+- [x] Request/response pattern
 
-### 5.2 Command Protocol
+### 5.2 Command Protocol ✅
 ```json
 // Request
 {"command": "focus-column-left"}
@@ -179,16 +179,17 @@ class AnimationController {
 {"success": false, "error": "No window focused"}
 ```
 
-### 5.3 CLI Tool (niri-msg)
-- [ ] Simple Swift CLI
-- [ ] Connects to socket, sends command, prints result
+### 5.3 CLI Tool (niri-msg) ✅
+- [x] Simple Swift CLI
+- [x] Connects to socket, sends command, prints result
+- [x] Complete command set: focus, move, consume/expel, size, scroll, workspace
 
 ### 5.4 Event Subscription
 - [ ] Clients can subscribe to events
 - [ ] Window focused, workspace changed, etc.
 - [ ] For sketchybar integration
 
-**Deliverable:** Can control via `niri-msg` commands
+**Deliverable:** Can control via `niri-msg` commands ✅
 
 ---
 
@@ -302,11 +303,11 @@ Multiple systems trying to move windows:
 
 ## Milestones
 
-| Milestone | Phases | Target |
+| Milestone | Phases | Status |
 |-----------|--------|--------|
-| MVP | 1-3 | Manual window arrangement works |
-| Usable | 4-5 | Gestures and IPC work |
-| Complete | 6-8 | Full feature parity |
+| MVP | 1-3 | ✅ Complete |
+| Usable | 4-5 | ✅ Complete |
+| Complete | 6-8 | 🚧 In progress |
 
 ---
 

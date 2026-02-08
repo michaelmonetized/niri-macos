@@ -7,6 +7,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let logger = Logger.shared
     private let layoutEngine = LayoutEngine.shared
     private let ipcServer = IPCServer.shared
+    private let gestureRecognizer = GestureRecognizer.shared
+    private let axObserver = AXWindowObserver.shared
     
     private var statusItem: NSStatusItem?
     private var windowObserver: WindowObserver?
@@ -20,7 +22,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let hasPermissions = WindowEnumerator.shared.checkAccessibilityPermissions()
         if !hasPermissions {
             logger.error("Accessibility permissions required!")
-            logger.info("Please grant access in System Preferences → Security & Privacy → Accessibility")
+            logger.info("Please grant access in System Preferences → Privacy & Security → Accessibility")
             // Continue anyway - it will prompt the user
         }
         
@@ -30,7 +32,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Start IPC server
         ipcServer.start()
         
-        // Start observing window changes
+        // Start AX observer and wire callbacks
+        setupAXObserver()
+        
+        // Start gesture recognizer and wire to layout engine
+        setupGestureRecognizer()
+        
+        // Start observing workspace/app changes
         windowObserver = WindowObserver()
         windowObserver?.start()
         
@@ -38,9 +46,89 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupMenubar()
         
         logger.info("niri-macos ready")
+        logger.info("IPC socket: /tmp/niri-macos.sock")
+        logger.info("Use 'niri-msg help' for available commands")
         
         // Debug print initial state
         layoutEngine.debugPrint()
+    }
+    
+    private func setupAXObserver() {
+        // Wire AX observer callbacks to layout engine
+        axObserver.onWindowCreated = { [weak self] windowID, pid in
+            self?.logger.debug("AX: Window created \(windowID) (pid \(pid))")
+            self?.layoutEngine.addWindow(windowID)
+        }
+        
+        axObserver.onWindowDestroyed = { [weak self] windowID, pid in
+            self?.logger.debug("AX: Window destroyed (pid \(pid))")
+            // Refresh layout to clean up orphaned windows
+            self?.layoutEngine.refresh()
+        }
+        
+        axObserver.onWindowFocused = { [weak self] windowID in
+            self?.logger.debug("AX: Window focused \(windowID)")
+            self?.layoutEngine.syncFocus(to: windowID)
+        }
+        
+        axObserver.onWindowMoved = { [weak self] windowID, frame in
+            self?.logger.debug("AX: Window moved \(windowID) to \(frame)")
+            // For now, we don't react to external moves (we're controlling positions)
+        }
+        
+        axObserver.onWindowResized = { [weak self] windowID, frame in
+            self?.logger.debug("AX: Window resized \(windowID) to \(frame)")
+            // For now, we don't react to external resizes
+        }
+        
+        axObserver.onWindowMinimized = { [weak self] windowID, minimized in
+            self?.logger.debug("AX: Window \(windowID) minimized=\(minimized)")
+            if minimized {
+                self?.layoutEngine.removeWindow(windowID)
+            }
+        }
+        
+        axObserver.start()
+    }
+    
+    private func setupGestureRecognizer() {
+        // Wire gesture recognizer to layout engine for scrolling
+        gestureRecognizer.onScroll = { [weak self] delta in
+            // Invert delta for natural scrolling (swipe left = scroll right)
+            self?.layoutEngine.scroll(by: -delta)
+        }
+        
+        gestureRecognizer.onScrollBegan = { [weak self] in
+            self?.logger.debug("Gesture: Scroll began")
+        }
+        
+        gestureRecognizer.onScrollEnded = { [weak self] in
+            self?.logger.debug("Gesture: Scroll ended")
+        }
+        
+        // Discrete scroll callbacks (Cmd+Shift+scroll for windows)
+        gestureRecognizer.onFocusWindowLeft = { [weak self] in
+            self?.logger.debug("Gesture: Focus window left")
+            self?.layoutEngine.focusColumnLeft()
+        }
+        
+        gestureRecognizer.onFocusWindowRight = { [weak self] in
+            self?.logger.debug("Gesture: Focus window right")
+            self?.layoutEngine.focusColumnRight()
+        }
+        
+        // Discrete scroll callbacks (Cmd+scroll for workspaces)
+        gestureRecognizer.onWorkspaceUp = { [weak self] in
+            self?.logger.debug("Gesture: Workspace up")
+            self?.layoutEngine.workspaceUp()
+        }
+        
+        gestureRecognizer.onWorkspaceDown = { [weak self] in
+            self?.logger.debug("Gesture: Workspace down")
+            self?.layoutEngine.workspaceDown()
+        }
+        
+        gestureRecognizer.start()
     }
     
     func applicationWillTerminate(_ notification: Notification) {
@@ -48,6 +136,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         logger.info("niri-macos shutting down...")
         logger.info("========================================")
         
+        gestureRecognizer.stop()
+        axObserver.stop()
         windowObserver?.stop()
         ipcServer.stop()
         layoutEngine.stop()
@@ -83,8 +173,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         menu.addItem(NSMenuItem.separator())
         
-        menu.addItem(NSMenuItem(title: "⇐ Move Left", action: #selector(moveLeft), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: "⇒ Move Right", action: #selector(moveRight), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "⇐ Move Column Left", action: #selector(moveLeft), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "⇒ Move Column Right", action: #selector(moveRight), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "⬆ Move Window Up", action: #selector(moveWinUp), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "⬇ Move Window Down", action: #selector(moveWinDown), keyEquivalent: ""))
         
         menu.addItem(NSMenuItem.separator())
         
@@ -95,6 +187,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         menu.addItem(NSMenuItem(title: "⟷ Cycle Width", action: #selector(cycleWidth), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "⊙ Center Column", action: #selector(centerColumn), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "⬛ Toggle Fullscreen", action: #selector(toggleFullscreen), keyEquivalent: ""))
+        
+        menu.addItem(NSMenuItem.separator())
+        
+        menu.addItem(NSMenuItem(title: "↑ Workspace Up", action: #selector(workspaceUp), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "↓ Workspace Down", action: #selector(workspaceDown), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "⊕ Create Workspace Above", action: #selector(createWorkspaceAbove), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "⊕ Create Workspace Below", action: #selector(createWorkspaceBelow), keyEquivalent: ""))
+        
+        menu.addItem(NSMenuItem.separator())
+        
+        // Split groups
+        menu.addItem(NSMenuItem(title: "⬛⬛ Split Horizontal", action: #selector(splitHorizontal), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "⬛/⬛ Split Vertical", action: #selector(splitVertical), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "⊞ Split Quad", action: #selector(splitQuad), keyEquivalent: ""))
+        
+        menu.addItem(NSMenuItem.separator())
+        
+        menu.addItem(NSMenuItem(title: "⟳ Refresh Layout", action: #selector(refreshLayout), keyEquivalent: "r"))
         
         menu.addItem(NSMenuItem.separator())
         
@@ -131,12 +242,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     @objc private func moveLeft() { layoutEngine.moveColumnLeft() }
     @objc private func moveRight() { layoutEngine.moveColumnRight() }
+    @objc private func moveWinUp() { layoutEngine.moveWindowUp() }
+    @objc private func moveWinDown() { layoutEngine.moveWindowDown() }
     
     @objc private func consumeWindow() { layoutEngine.consumeWindowIntoColumn() }
     @objc private func expelWindow() { layoutEngine.expelWindowFromColumn() }
     
     @objc private func cycleWidth() { layoutEngine.switchPresetColumnWidth() }
     @objc private func centerColumn() { layoutEngine.centerColumn() }
+    @objc private func toggleFullscreen() { layoutEngine.toggleFullscreen() }
+    
+    @objc private func workspaceUp() { layoutEngine.workspaceUp() }
+    @objc private func workspaceDown() { layoutEngine.workspaceDown() }
+    @objc private func createWorkspaceAbove() { layoutEngine.createWorkspaceAbove() }
+    @objc private func createWorkspaceBelow() { layoutEngine.createWorkspaceBelow() }
+    
+    @objc private func splitHorizontal() { layoutEngine.createSplitGroup(.horizontal) }
+    @objc private func splitVertical() { layoutEngine.createSplitGroup(.vertical) }
+    @objc private func splitQuad() { layoutEngine.createSplitGroup(.quad) }
+    
+    @objc private func refreshLayout() { layoutEngine.refresh() }
     
     @objc private func openLog() {
         NSWorkspace.shared.open(URL(fileURLWithPath: "/tmp/niri-macos.log"))
