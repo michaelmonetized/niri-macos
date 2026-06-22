@@ -4,8 +4,8 @@ import AppKit
 import QuartzCore
 
 /// Manages spring-based animations for window movements
-class AnimationController {
-    static let shared = AnimationController()
+public class AnimationController {
+    public static let shared = AnimationController()
     
     private let logger = Logger.shared
     private var displayLink: CVDisplayLink?
@@ -18,18 +18,18 @@ class AnimationController {
     private let lock = NSLock()
     
     // Configuration
-    var config = AnimationConfig()
+    public var config = AnimationConfig()
     
     // Callbacks
-    var onWindowFrameUpdate: ((WindowID, CGRect) -> Void)?
-    var onScrollUpdate: ((CGFloat) -> Void)?
-    var onAnimationsComplete: (() -> Void)?
+    public var onWindowFrameUpdate: ((WindowID, CGRect) -> Void)?
+    public var onScrollUpdate: ((CGFloat) -> Void)?
+    public var onAnimationsComplete: (() -> Void)?
     
     private init() {}
     
     // MARK: - Lifecycle
     
-    func start() {
+    public func start() {
         guard !isRunning else { return }
         
         // Create display link for smooth 60fps updates
@@ -56,7 +56,7 @@ class AnimationController {
         logger.info("Animation controller started")
     }
     
-    func stop() {
+    public func stop() {
         guard isRunning else { return }
         
         if let displayLink = displayLink {
@@ -76,7 +76,7 @@ class AnimationController {
     // MARK: - Animation API
     
     /// Animate a window to a target frame
-    func animateWindow(_ windowID: WindowID, to targetFrame: CGRect, from currentFrame: CGRect? = nil) {
+    public func animateWindow(_ windowID: WindowID, to targetFrame: CGRect, from currentFrame: CGRect? = nil) {
         lock.lock()
         defer { lock.unlock() }
         
@@ -95,7 +95,7 @@ class AnimationController {
     }
     
     /// Animate scroll offset
-    func animateScroll(to target: CGFloat, from current: CGFloat? = nil) {
+    public func animateScroll(to target: CGFloat, from current: CGFloat? = nil) {
         lock.lock()
         defer { lock.unlock() }
         
@@ -112,7 +112,7 @@ class AnimationController {
     }
     
     /// Set window frame immediately (no animation)
-    func setWindowImmediate(_ windowID: WindowID, frame: CGRect) {
+    public func setWindowImmediate(_ windowID: WindowID, frame: CGRect) {
         lock.lock()
         windowAnimations.removeValue(forKey: windowID)
         lock.unlock()
@@ -134,7 +134,7 @@ class AnimationController {
     }
     
     /// Cancel all animations
-    func cancelAll() {
+    public func cancelAll() {
         lock.lock()
         windowAnimations.removeAll()
         scrollAnimation = nil
@@ -142,14 +142,14 @@ class AnimationController {
     }
     
     /// Cancel animation for specific window
-    func cancelWindow(_ windowID: WindowID) {
+    public func cancelWindow(_ windowID: WindowID) {
         lock.lock()
         windowAnimations.removeValue(forKey: windowID)
         lock.unlock()
     }
     
     /// Check if any animations are running
-    var hasActiveAnimations: Bool {
+    public var hasActiveAnimations: Bool {
         lock.lock()
         defer { lock.unlock() }
         return !windowAnimations.isEmpty || scrollAnimation != nil
@@ -158,7 +158,7 @@ class AnimationController {
     // MARK: - Animation Tick
     
     private func tick() {
-        let dt: TimeInterval = 1.0 / 60.0  // Assume 60fps
+        let dt: TimeInterval = Constants.animationFrameInterval
         
         lock.lock()
         
@@ -195,24 +195,25 @@ class AnimationController {
         }
         
         let shouldNotifyComplete = animationsRemoved && windowAnimations.isEmpty && scrollAnimation == nil
-        
+
+        // Capture callback references under lock to prevent TOCTOU races
+        let windowCallback = self.onWindowFrameUpdate
+        let scrollCallback = self.onScrollUpdate
+        let completeCallback = shouldNotifyComplete ? self.onAnimationsComplete : nil
+
         lock.unlock()
-        
-        // Dispatch updates to main thread
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            
+
+        // Dispatch updates to main thread using captured callbacks
+        DispatchQueue.main.async {
             for (windowID, frame) in framesToUpdate {
-                self.onWindowFrameUpdate?(windowID, frame)
+                windowCallback?(windowID, frame)
             }
-            
+
             if let scroll = scrollToUpdate {
-                self.onScrollUpdate?(scroll)
+                scrollCallback?(scroll)
             }
-            
-            if shouldNotifyComplete {
-                self.onAnimationsComplete?()
-            }
+
+            completeCallback?()
         }
     }
 }
@@ -227,11 +228,11 @@ struct WindowAnimation {
     var spring: SpringConfig
     
     var isSettled: Bool {
-        let positionSettled = abs(currentFrame.origin.x - targetFrame.origin.x) < 0.5 &&
-                              abs(currentFrame.origin.y - targetFrame.origin.y) < 0.5
-        let sizeSettled = abs(currentFrame.width - targetFrame.width) < 0.5 &&
-                          abs(currentFrame.height - targetFrame.height) < 0.5
-        let velocitySettled = abs(velocity.x) < 0.5 && abs(velocity.y) < 0.5
+        let positionSettled = abs(currentFrame.origin.x - targetFrame.origin.x) < Constants.animationSettledThreshold &&
+                              abs(currentFrame.origin.y - targetFrame.origin.y) < Constants.animationSettledThreshold
+        let sizeSettled = abs(currentFrame.width - targetFrame.width) < Constants.animationSettledThreshold &&
+                          abs(currentFrame.height - targetFrame.height) < Constants.animationSettledThreshold
+        let velocitySettled = abs(velocity.x) < Constants.animationSettledThreshold && abs(velocity.y) < Constants.animationSettledThreshold
         return positionSettled && sizeSettled && velocitySettled
     }
     
@@ -285,7 +286,7 @@ struct ScrollAnimation {
     var spring: SpringConfig
     
     var isSettled: Bool {
-        abs(currentValue - targetValue) < 0.5 && abs(velocity) < 0.5
+        abs(currentValue - targetValue) < Constants.animationSettledThreshold && abs(velocity) < Constants.animationSettledThreshold
     }
     
     mutating func step(dt: TimeInterval, springConfig: SpringConfig) {

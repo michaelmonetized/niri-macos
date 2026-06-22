@@ -2,8 +2,8 @@ import Foundation
 
 /// CLI tool for sending commands to niri-macos
 struct NiriMsg {
-    static let socketPath = "/tmp/niri-macos.sock"
-    
+    static var socketPath = "/tmp/niri-macos.sock"
+
     static let usage = """
     niri-msg - Control niri-macos window manager
 
@@ -80,27 +80,34 @@ struct NiriMsg {
     """
     
     static func main() {
-        let args = Array(CommandLine.arguments.dropFirst())
-        
+        var args = Array(CommandLine.arguments.dropFirst())
+
+        // Parse --socket flag before command processing
+        if let idx = args.firstIndex(of: "--socket") ?? args.firstIndex(of: "-s"),
+           idx + 1 < args.count {
+            socketPath = args[idx + 1]
+            args.removeSubrange(idx...idx+1)
+        }
+
         guard !args.isEmpty else {
             print(usage)
             exit(0)
         }
-        
+
         let command = args[0]
-        
+
         if command == "help" || command == "--help" || command == "-h" {
             print(usage)
             exit(0)
         }
-        
+
         // Build request
         var request: [String: Any] = ["command": command]
-        
+
         // Handle commands with arguments
         if args.count > 1 {
             var cmdArgs: [String: String] = [:]
-            
+
             switch command {
             case "scroll-workspace":
                 cmdArgs["delta"] = args[1]
@@ -114,7 +121,7 @@ struct NiriMsg {
                     cmdArgs["arg\(i)"] = arg
                 }
             }
-            
+
             request["args"] = cmdArgs
         }
         
@@ -191,7 +198,7 @@ struct NiriMsg {
         }
         
         // Read response
-        var buffer = [CChar](repeating: 0, count: 8192)
+        var buffer = [CChar](repeating: 0, count: 65536)
         let bytesRead = read(sock, &buffer, buffer.count - 1)
         
         guard bytesRead > 0 else {

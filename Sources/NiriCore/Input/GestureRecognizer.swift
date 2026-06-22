@@ -3,15 +3,15 @@ import CoreGraphics
 import AppKit
 
 /// Scroll action types
-enum ScrollAction {
+public enum ScrollAction {
     case horizontalWindowScroll(direction: Int)  // -1 = left, 1 = right
     case verticalWorkspaceScroll(direction: Int) // -1 = up, 1 = down
     case none
 }
 
 /// Recognizes trackpad gestures for scrolling the workspace
-class GestureRecognizer {
-    static let shared = GestureRecognizer()
+public class GestureRecognizer {
+    public static let shared = GestureRecognizer()
     
     private let logger = Logger.shared
     private var eventTap: CFMachPort?
@@ -26,9 +26,14 @@ class GestureRecognizer {
     // Discrete scroll accumulator (for snap-to-window behavior)
     private var horizontalScrollAccumulator: CGFloat = 0
     private var verticalScrollAccumulator: CGFloat = 0
-    private let scrollThreshold: CGFloat = 15.0  // Threshold for one "click"
+    private let scrollThreshold: CGFloat = 25.0  // Threshold for one "click" (increased for less sensitivity)
     private var lastScrollEventTime: TimeInterval = 0
-    private let scrollResetDelay: TimeInterval = 0.3  // Reset accumulator after pause
+    private let scrollResetDelay: TimeInterval = 0.25  // Reset accumulator after pause
+    
+    // Cooldown to prevent rapid-fire triggers
+    private var lastHorizontalTriggerTime: TimeInterval = 0
+    private var lastVerticalTriggerTime: TimeInterval = 0
+    private let triggerCooldown: TimeInterval = 0.15  // Minimum time between triggers
     
     // Configuration
     var scrollMultiplier: CGFloat = 1.5
@@ -44,15 +49,15 @@ class GestureRecognizer {
     var workspaceScrollModifiers: CGEventFlags = [.maskCommand]
     
     // Callbacks
-    var onScroll: ((CGFloat) -> Void)?
-    var onScrollBegan: (() -> Void)?
-    var onScrollEnded: (() -> Void)?
+    public var onScroll: ((CGFloat) -> Void)?
+    public var onScrollBegan: (() -> Void)?
+    public var onScrollEnded: (() -> Void)?
     
     // Discrete callbacks (for snap-to-window/workspace)
-    var onFocusWindowLeft: (() -> Void)?
-    var onFocusWindowRight: (() -> Void)?
-    var onWorkspaceUp: (() -> Void)?
-    var onWorkspaceDown: (() -> Void)?
+    public var onFocusWindowLeft: (() -> Void)?
+    public var onFocusWindowRight: (() -> Void)?
+    public var onWorkspaceUp: (() -> Void)?
+    public var onWorkspaceDown: (() -> Void)?
     
     // Swipe gesture callbacks
     var onSwipeLeft: (() -> Void)?
@@ -64,7 +69,7 @@ class GestureRecognizer {
     
     // MARK: - Lifecycle
     
-    func start() {
+    public func start() {
         logger.info("Gesture recognizer starting...")
         
         // Create event tap for scroll events
@@ -95,7 +100,7 @@ class GestureRecognizer {
         logger.info("Gesture recognizer started")
     }
     
-    func stop() {
+    public func stop() {
         momentumTimer?.invalidate()
         momentumTimer = nil
         
@@ -171,14 +176,18 @@ class GestureRecognizer {
                 let effectiveDelta = abs(deltaX) > abs(deltaY) ? CGFloat(deltaX) : CGFloat(-deltaY)
                 horizontalScrollAccumulator += effectiveDelta
                 
-                // Trigger focus change when threshold is reached
-                if horizontalScrollAccumulator >= scrollThreshold {
+                // Trigger focus change when threshold is reached (with cooldown)
+                let canTrigger = currentTime - lastHorizontalTriggerTime >= triggerCooldown
+                
+                if horizontalScrollAccumulator >= scrollThreshold && canTrigger {
                     onFocusWindowRight?()
                     horizontalScrollAccumulator = 0
+                    lastHorizontalTriggerTime = currentTime
                     logger.debug("Discrete scroll: focus right")
-                } else if horizontalScrollAccumulator <= -scrollThreshold {
+                } else if horizontalScrollAccumulator <= -scrollThreshold && canTrigger {
                     onFocusWindowLeft?()
                     horizontalScrollAccumulator = 0
+                    lastHorizontalTriggerTime = currentTime
                     logger.debug("Discrete scroll: focus left")
                 }
             } else {
@@ -197,15 +206,19 @@ class GestureRecognizer {
                 // Accumulate vertical scroll
                 verticalScrollAccumulator += CGFloat(deltaY)
                 
-                // Trigger workspace change when threshold is reached
+                // Trigger workspace change when threshold is reached (with cooldown)
                 // Note: positive deltaY = scroll down = workspace down (next workspace)
-                if verticalScrollAccumulator >= scrollThreshold {
+                let canTrigger = currentTime - lastVerticalTriggerTime >= triggerCooldown
+                
+                if verticalScrollAccumulator >= scrollThreshold && canTrigger {
                     onWorkspaceDown?()
                     verticalScrollAccumulator = 0
+                    lastVerticalTriggerTime = currentTime
                     logger.debug("Discrete scroll: workspace down")
-                } else if verticalScrollAccumulator <= -scrollThreshold {
+                } else if verticalScrollAccumulator <= -scrollThreshold && canTrigger {
                     onWorkspaceUp?()
                     verticalScrollAccumulator = 0
+                    lastVerticalTriggerTime = currentTime
                     logger.debug("Discrete scroll: workspace up")
                 }
             }
@@ -274,7 +287,7 @@ class GestureRecognizer {
     }
     
     /// Cancel any ongoing momentum
-    func cancelMomentum() {
+    public func cancelMomentum() {
         momentumTimer?.invalidate()
         momentumTimer = nil
         scrollVelocity = 0

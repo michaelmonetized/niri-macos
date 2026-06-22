@@ -3,14 +3,14 @@ import CoreGraphics
 import AppKit
 
 /// Enumerates and tracks windows using CGWindowList APIs
-class WindowEnumerator {
-    static let shared = WindowEnumerator()
+public class WindowEnumerator: WindowEnumerating {
+    public static let shared = WindowEnumerator()
     private let logger = Logger.shared
     
     private init() {}
     
     /// Get all windows currently on screen
-    func getAllWindows() -> [WindowInfo] {
+    public func getAllWindows() -> [WindowInfo] {
         guard let windowList = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
             logger.error("Failed to get window list")
             return []
@@ -21,7 +21,7 @@ class WindowEnumerator {
     }
     
     /// Get windows for a specific app
-    func getWindowsForApp(pid: pid_t) -> [WindowInfo] {
+    public func getWindowsForApp(pid: pid_t) -> [WindowInfo] {
         guard let windowList = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] else {
             return []
         }
@@ -31,7 +31,7 @@ class WindowEnumerator {
     }
     
     /// Get a specific window by ID
-    func getWindow(id: WindowID) -> WindowInfo? {
+    public func getWindow(id: WindowID) -> WindowInfo? {
         guard let windowList = CGWindowListCopyWindowInfo([.optionIncludingWindow], id) as? [[String: Any]],
               let dict = windowList.first else {
             return nil
@@ -69,26 +69,26 @@ class WindowEnumerator {
             appName: appName,
             title: title,
             frame: frame,
-            space: 0,  // TODO: Get from CGS private API
+            space: -1,  // Unknown: CGS private API not used
             isOnScreen: isOnScreen,
-            isMinimized: false,  // TODO: Get from AX
+            isMinimized: false,  // Correct for optionOnScreenOnly (minimized windows excluded)
             layer: layer
         )
     }
     
     /// Check if we have accessibility permissions
-    func checkAccessibilityPermissions() -> Bool {
+    public func checkAccessibilityPermissions() -> Bool {
         let options = [kAXTrustedCheckOptionPrompt.takeRetainedValue() as String: true] as CFDictionary
         return AXIsProcessTrustedWithOptions(options)
     }
     
     /// Get the frontmost (focused) application
-    func getFrontmostApp() -> NSRunningApplication? {
+    public func getFrontmostApp() -> NSRunningApplication? {
         return NSWorkspace.shared.frontmostApplication
     }
     
     /// Get the focused window using Accessibility APIs
-    func getFocusedWindow() -> WindowInfo? {
+    public func getFocusedWindow() -> WindowInfo? {
         guard let app = getFrontmostApp() else { return nil }
         
         let axApp = AXUIElementCreateApplication(app.processIdentifier)
@@ -99,6 +99,9 @@ class WindowEnumerator {
             return nil
         }
         
+        // CFTypeRef -> AXUIElement cast always succeeds for window elements
+        let axWindow = unsafeBitCast(windowRef, to: AXUIElement.self)
+        
         // Get window position and size
         var position = CGPoint.zero
         var size = CGSize.zero
@@ -106,14 +109,18 @@ class WindowEnumerator {
         var positionRef: CFTypeRef?
         var sizeRef: CFTypeRef?
         
-        if AXUIElementCopyAttributeValue(windowRef as! AXUIElement, kAXPositionAttribute as CFString, &positionRef) == .success,
+        if AXUIElementCopyAttributeValue(axWindow, kAXPositionAttribute as CFString, &positionRef) == .success,
            let posValue = positionRef {
-            AXValueGetValue(posValue as! AXValue, .cgPoint, &position)
+            // CFTypeRef -> AXValue cast always succeeds for position attributes
+            let posAXValue = unsafeBitCast(posValue, to: AXValue.self)
+            AXValueGetValue(posAXValue, .cgPoint, &position)
         }
         
-        if AXUIElementCopyAttributeValue(windowRef as! AXUIElement, kAXSizeAttribute as CFString, &sizeRef) == .success,
+        if AXUIElementCopyAttributeValue(axWindow, kAXSizeAttribute as CFString, &sizeRef) == .success,
            let sizeValue = sizeRef {
-            AXValueGetValue(sizeValue as! AXValue, .cgSize, &size)
+            // CFTypeRef -> AXValue cast always succeeds for size attributes
+            let sizeAXValue = unsafeBitCast(sizeValue, to: AXValue.self)
+            AXValueGetValue(sizeAXValue, .cgSize, &size)
         }
         
         let frame = CGRect(origin: position, size: size)
@@ -121,7 +128,7 @@ class WindowEnumerator {
         // Get title
         var titleRef: CFTypeRef?
         var title = ""
-        if AXUIElementCopyAttributeValue(windowRef as! AXUIElement, kAXTitleAttribute as CFString, &titleRef) == .success,
+        if AXUIElementCopyAttributeValue(axWindow, kAXTitleAttribute as CFString, &titleRef) == .success,
            let titleStr = titleRef as? String {
             title = titleStr
         }
@@ -130,8 +137,7 @@ class WindowEnumerator {
         let windows = getWindowsForApp(pid: app.processIdentifier)
         let matched = windows.first { window in
             // Match by approximate frame (AX and CG frames can differ slightly)
-            abs(window.frame.origin.x - frame.origin.x) < 5 &&
-            abs(window.frame.origin.y - frame.origin.y) < 5
+            WindowEnumerator.framesMatch(window.frame, frame)
         }
         
         if let matched = matched {
@@ -146,10 +152,20 @@ class WindowEnumerator {
             appName: app.localizedName ?? "Unknown",
             title: title,
             frame: frame,
-            space: 0,
+            space: -1,
             isOnScreen: true,
             isMinimized: false,
             layer: 0
         )
+    }
+
+    // MARK: - Utilities
+
+    /// Check if two frames match within a tolerance
+    public static func framesMatch(_ a: CGRect, _ b: CGRect, tolerance: CGFloat = Constants.frameMatchTolerance) -> Bool {
+        abs(a.origin.x - b.origin.x) < tolerance &&
+        abs(a.origin.y - b.origin.y) < tolerance &&
+        abs(a.width - b.width) < tolerance &&
+        abs(a.height - b.height) < tolerance
     }
 }

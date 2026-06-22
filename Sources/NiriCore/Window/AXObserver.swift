@@ -3,8 +3,8 @@ import CoreGraphics
 import AppKit
 
 /// Observes window events via Accessibility APIs for real-time updates
-class AXWindowObserver {
-    static let shared = AXWindowObserver()
+public class AXWindowObserver {
+    public static let shared = AXWindowObserver()
     
     private let logger = Logger.shared
     private var observers: [pid_t: AXObserver] = [:]
@@ -13,19 +13,19 @@ class AXWindowObserver {
     private var terminationObserver: NSObjectProtocol?
     
     // Callbacks
-    var onWindowCreated: ((WindowID, pid_t) -> Void)?
-    var onWindowDestroyed: ((WindowID, pid_t) -> Void)?
-    var onWindowMoved: ((WindowID, CGRect) -> Void)?
-    var onWindowResized: ((WindowID, CGRect) -> Void)?
-    var onWindowFocused: ((WindowID) -> Void)?
-    var onWindowMinimized: ((WindowID, Bool) -> Void)?
-    var onWindowTitleChanged: ((WindowID, String) -> Void)?
+    public var onWindowCreated: ((WindowID, pid_t) -> Void)?
+    public var onWindowDestroyed: ((WindowID, pid_t) -> Void)?
+    public var onWindowMoved: ((WindowID, CGRect) -> Void)?
+    public var onWindowResized: ((WindowID, CGRect) -> Void)?
+    public var onWindowFocused: ((WindowID) -> Void)?
+    public var onWindowMinimized: ((WindowID, Bool) -> Void)?
+    public var onWindowTitleChanged: ((WindowID, String) -> Void)?
     
     private init() {}
     
     // MARK: - Lifecycle
     
-    func start() {
+    public func start() {
         logger.info("AX Observer starting...")
         
         // Observe app launches
@@ -58,7 +58,7 @@ class AXWindowObserver {
         logger.info("AX Observer started with \(observers.count) apps")
     }
     
-    func stop() {
+    public func stop() {
         if let observer = appObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(observer)
         }
@@ -178,7 +178,7 @@ class AXWindowObserver {
     // MARK: - Window ID Resolution
     
     /// Get CGWindowID for an AXUIElement window
-    func getWindowID(for axWindow: AXUIElement, pid: pid_t) -> WindowID? {
+    public func getWindowID(for axWindow: AXUIElement, pid: pid_t) -> WindowID? {
         // Get window position and size from AX
         var position = CGPoint.zero
         var size = CGSize.zero
@@ -188,12 +188,16 @@ class AXWindowObserver {
         
         if AXUIElementCopyAttributeValue(axWindow, kAXPositionAttribute as CFString, &positionRef) == .success,
            let posValue = positionRef {
-            AXValueGetValue(posValue as! AXValue, .cgPoint, &position)
+            // CFTypeRef -> AXValue cast always succeeds for position attributes
+            let posAXValue = unsafeBitCast(posValue, to: AXValue.self)
+            AXValueGetValue(posAXValue, .cgPoint, &position)
         }
         
         if AXUIElementCopyAttributeValue(axWindow, kAXSizeAttribute as CFString, &sizeRef) == .success,
            let sizeValue = sizeRef {
-            AXValueGetValue(sizeValue as! AXValue, .cgSize, &size)
+            // CFTypeRef -> AXValue cast always succeeds for size attributes
+            let sizeAXValue = unsafeBitCast(sizeValue, to: AXValue.self)
+            AXValueGetValue(sizeAXValue, .cgSize, &size)
         }
         
         // Find matching CGWindow
@@ -216,11 +220,10 @@ class AXWindowObserver {
             let ww = bounds["Width"] ?? 0
             let wh = bounds["Height"] ?? 0
             
-            // Match by approximate frame
-            if abs(wx - position.x) < 10 &&
-               abs(wy - position.y) < 10 &&
-               abs(ww - size.width) < 10 &&
-               abs(wh - size.height) < 10 {
+            // Match by approximate frame (wider tolerance for AX-to-CG matching)
+            let cgFrame = CGRect(x: wx, y: wy, width: ww, height: wh)
+            let axFrame = CGRect(origin: position, size: size)
+            if WindowEnumerator.framesMatch(cgFrame, axFrame) {
                 return windowID
             }
         }
@@ -229,7 +232,7 @@ class AXWindowObserver {
     }
     
     /// Get current frame from AXUIElement
-    func getWindowFrame(for axWindow: AXUIElement) -> CGRect? {
+    public func getWindowFrame(for axWindow: AXUIElement) -> CGRect? {
         var position = CGPoint.zero
         var size = CGSize.zero
         
@@ -238,14 +241,18 @@ class AXWindowObserver {
         
         if AXUIElementCopyAttributeValue(axWindow, kAXPositionAttribute as CFString, &positionRef) == .success,
            let posValue = positionRef {
-            AXValueGetValue(posValue as! AXValue, .cgPoint, &position)
+            // CFTypeRef -> AXValue cast always succeeds for position attributes
+            let posAXValue = unsafeBitCast(posValue, to: AXValue.self)
+            AXValueGetValue(posAXValue, .cgPoint, &position)
         } else {
             return nil
         }
         
         if AXUIElementCopyAttributeValue(axWindow, kAXSizeAttribute as CFString, &sizeRef) == .success,
            let sizeValue = sizeRef {
-            AXValueGetValue(sizeValue as! AXValue, .cgSize, &size)
+            // CFTypeRef -> AXValue cast always succeeds for size attributes
+            let sizeAXValue = unsafeBitCast(sizeValue, to: AXValue.self)
+            AXValueGetValue(sizeAXValue, .cgSize, &size)
         } else {
             return nil
         }
@@ -254,7 +261,7 @@ class AXWindowObserver {
     }
     
     /// Get window title from AXUIElement
-    func getWindowTitle(for axWindow: AXUIElement) -> String? {
+    public func getWindowTitle(for axWindow: AXUIElement) -> String? {
         var titleRef: CFTypeRef?
         if AXUIElementCopyAttributeValue(axWindow, kAXTitleAttribute as CFString, &titleRef) == .success,
            let title = titleRef as? String {
@@ -265,7 +272,7 @@ class AXWindowObserver {
     
     // MARK: - AX Callback Handler
     
-    func handleNotification(_ notification: String, element: AXUIElement, pid: pid_t) {
+    public func handleNotification(_ notification: String, element: AXUIElement, pid: pid_t) {
         switch notification {
         case kAXWindowCreatedNotification:
             if let windowID = getWindowID(for: element, pid: pid) {

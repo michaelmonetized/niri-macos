@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import NiriCore
 
 // MARK: - App Delegate
 
@@ -18,39 +19,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         logger.info("niri-macos starting...")
         logger.info("========================================")
         
-        // Check accessibility permissions
-        let hasPermissions = WindowEnumerator.shared.checkAccessibilityPermissions()
-        if !hasPermissions {
-            logger.error("Accessibility permissions required!")
-            logger.info("Please grant access in System Preferences → Privacy & Security → Accessibility")
-            // Continue anyway - it will prompt the user
+        // Check accessibility permissions - this is CRITICAL
+        if !checkAndRequestAccessibilityPermissions() {
+            // Don't proceed until permissions are granted
+            // Setup minimal menubar so user can quit
+            setupMenubar()
+            return
         }
         
-        // Start layout engine
-        layoutEngine.start()
-        
-        // Start IPC server
-        ipcServer.start()
-        
-        // Start AX observer and wire callbacks
-        setupAXObserver()
-        
-        // Start gesture recognizer and wire to layout engine
-        setupGestureRecognizer()
-        
-        // Start observing workspace/app changes
-        windowObserver = WindowObserver()
-        windowObserver?.start()
-        
-        // Setup menubar
-        setupMenubar()
-        
-        logger.info("niri-macos ready")
-        logger.info("IPC socket: /tmp/niri-macos.sock")
-        logger.info("Use 'niri-msg help' for available commands")
-        
-        // Debug print initial state
-        layoutEngine.debugPrint()
+        // Permissions already granted - initialize everything
+        initializeAfterPermissions()
     }
     
     private func setupAXObserver() {
@@ -233,6 +211,114 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem?.menu = menu
     }
     
+    // MARK: - Accessibility Permissions
+    
+    /// Check for accessibility permissions and prompt user if needed
+    /// Returns true if permissions are granted, false if waiting for grant
+    private func checkAndRequestAccessibilityPermissions() -> Bool {
+        // First check if already trusted (without prompting)
+        if AXIsProcessTrusted() {
+            logger.info("✓ Accessibility permissions already granted")
+            return true
+        }
+        
+        logger.info("Accessibility permissions not granted - prompting user...")
+        
+        // Show an informative alert first
+        let alert = NSAlert()
+        alert.messageText = "Accessibility Permissions Required"
+        alert.informativeText = """
+            niri-macos needs Accessibility permissions to:
+            
+            • Move and resize windows
+            • Observe window events
+            • Respond to keyboard shortcuts
+            
+            Click "Open System Settings" to grant access, then restart niri-macos.
+            
+            In System Settings → Privacy & Security → Accessibility:
+            Add niri-macos and enable it.
+            """
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Open System Settings")
+        alert.addButton(withTitle: "Quit")
+        
+        let response = alert.runModal()
+        
+        if response == .alertFirstButtonReturn {
+            // Prompt for accessibility permissions (this opens System Settings)
+            let options = [kAXTrustedCheckOptionPrompt.takeRetainedValue() as String: true] as CFDictionary
+            let _ = AXIsProcessTrustedWithOptions(options)
+            
+            logger.info("Opened System Settings for Accessibility permissions")
+            logger.info("User must grant permissions and restart niri-macos")
+            
+            // Start polling for permission grant
+            startPermissionPolling()
+            return false
+        } else {
+            // User chose to quit
+            logger.info("User declined to grant accessibility permissions - quitting")
+            NSApplication.shared.terminate(nil)
+            return false
+        }
+    }
+    
+    /// Poll for accessibility permission grant and auto-initialize when granted
+    private func startPermissionPolling() {
+        Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
+            if AXIsProcessTrusted() {
+                timer.invalidate()
+                self?.logger.info("✓ Accessibility permissions granted!")
+                
+                // Show success notification
+                DispatchQueue.main.async {
+                    let alert = NSAlert()
+                    alert.messageText = "Permissions Granted!"
+                    alert.informativeText = "niri-macos now has accessibility permissions. Starting..."
+                    alert.alertStyle = .informational
+                    alert.addButton(withTitle: "OK")
+                    alert.runModal()
+                    
+                    // Now initialize everything
+                    self?.initializeAfterPermissions()
+                }
+            }
+        }
+    }
+    
+    /// Initialize the app after accessibility permissions are granted
+    private func initializeAfterPermissions() {
+        // Apply config to subsystems
+        ConfigManager.shared.apply()
+
+        // Start layout engine
+        layoutEngine.start()
+        
+        // Start IPC server
+        ipcServer.start()
+        
+        // Start AX observer and wire callbacks
+        setupAXObserver()
+        
+        // Start gesture recognizer and wire to layout engine
+        setupGestureRecognizer()
+        
+        // Start observing workspace/app changes
+        windowObserver = WindowObserver()
+        windowObserver?.start()
+        
+        // Setup menubar
+        setupMenubar()
+        
+        logger.info("niri-macos ready")
+        logger.info("IPC socket: /tmp/niri-macos.sock")
+        logger.info("Use 'niri-msg help' for available commands")
+        
+        // Debug print initial state
+        layoutEngine.debugPrint()
+    }
+    
     // MARK: - Menu Actions
     
     @objc private func focusLeft() { layoutEngine.focusColumnLeft() }
@@ -338,9 +424,78 @@ func setupSignalHandlers() {
     }
 }
 
+// MARK: - CLI Argument Parsing
+
+func parseArguments() -> (configPath: String?, socketPath: String?, logLevel: LogLevel?) {
+    let args = CommandLine.arguments
+    var configPath: String?
+    var socketPath: String?
+    var logLevel: LogLevel?
+    var i = 1
+
+    while i < args.count {
+        switch args[i] {
+        case "--config", "-c":
+            i += 1
+            if i < args.count { configPath = args[i] }
+        case "--socket", "-s":
+            i += 1
+            if i < args.count { socketPath = args[i] }
+        case "--log-level":
+            i += 1
+            if i < args.count {
+                switch args[i].lowercased() {
+                case "debug": logLevel = .debug
+                case "info": logLevel = .info
+                case "error": logLevel = .error
+                default: break
+                }
+            }
+        case "--version", "-v":
+            print("niri-macos 0.1.0")
+            exit(0)
+        case "--help", "-h":
+            print("""
+            niri-macos - Scrollable tiling window manager for macOS
+
+            Usage: niri-macos [options]
+
+            Options:
+              -c, --config <path>     Config file path (default: ~/.config/niri-macos/config.json)
+              -s, --socket <path>     IPC socket path (default: /tmp/niri-macos.sock)
+              --log-level <level>     Log level: debug, info, error (default: info)
+              -v, --version           Show version
+              -h, --help              Show this help
+            """)
+            exit(0)
+        default:
+            break
+        }
+        i += 1
+    }
+
+    return (configPath, socketPath, logLevel)
+}
+
 // MARK: - Main
 
 setupSignalHandlers()
+
+let cliArgs = parseArguments()
+
+// Apply log level early
+if let level = cliArgs.logLevel {
+    Logger.shared.minimumLevel = level
+}
+
+// Load config
+let configManager = ConfigManager.shared
+configManager.load(from: cliArgs.configPath)
+
+// Apply CLI overrides (socket path)
+if let socketPath = cliArgs.socketPath {
+    IPCServer.shared.socketPath = socketPath
+}
 
 let app = NSApplication.shared
 let delegate = AppDelegate()

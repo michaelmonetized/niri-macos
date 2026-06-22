@@ -76,7 +76,7 @@ niri is a revolutionary Wayland compositor that reimagines tiling window managem
 │                              │                                  │
 │  ┌────────────────┐  ┌───────┴───────┐  ┌────────────────────┐ │
 │  │ IPC Server     │  │ Gesture Input │  │ Config Manager     │ │
-│  │ (Unix socket)  │  │ (CGEvent tap) │  │ (live reload)      │ │
+│  │ (Unix socket)  │  │ (CGEvent tap) │  │ (JSON)             │ │
 │  └────────────────┘  └───────────────┘  └────────────────────┘ │
 └──────────────────────────────────────────────────────────────────┘
           │                    │                    │
@@ -108,68 +108,70 @@ cp .build/release/niri-macos ~/.local/bin/
 # Start the daemon
 niri-macos
 
-# With a config file
-niri-macos --config ~/.config/niri-macos/config.kdl
+# With options
+niri-macos --config ~/.config/niri-macos/config.json
+niri-macos --socket /tmp/custom.sock
+niri-macos --log-level debug
 
 # Send commands via IPC
 niri-msg focus-column-left
 niri-msg focus-column-right
 niri-msg move-column-left
 niri-msg center-column
+
+# niri-msg with custom socket
+niri-msg --socket /tmp/custom.sock status
 ```
+
+### CLI Options
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `-c, --config <path>` | Config file path | `~/.config/niri-macos/config.json` |
+| `-s, --socket <path>` | IPC socket path | `/tmp/niri-macos.sock` |
+| `--log-level <level>` | debug, info, error | info |
+| `-v, --version` | Show version | |
+| `-h, --help` | Show help | |
 
 ## Configuration
 
-```kdl
-// ~/.config/niri-macos/config.kdl
+Config file: `~/.config/niri-macos/config.json`
 
-layout {
-    gaps 16
-    center-focused-column "never"  // "never" | "always" | "on-overflow"
-    
-    preset-column-widths {
-        proportion 0.33
-        proportion 0.5  
-        proportion 0.66
+```json
+{
+  "layout": {
+    "gaps": 16,
+    "outerGaps": { "top": 0, "bottom": 0, "left": 0, "right": 0 },
+    "centerFocusedColumn": "never",
+    "presetWidths": [
+      { "type": "proportion", "value": 0.33 },
+      { "type": "proportion", "value": 0.5 },
+      { "type": "proportion", "value": 0.66 },
+      { "type": "proportion", "value": 1.0 }
+    ],
+    "defaultWidth": { "type": "proportion", "value": 0.5 }
+  },
+  "animation": {
+    "enabled": true,
+    "workspaceSwitch": { "damping": 0.8, "stiffness": 500, "mass": 1.0, "epsilon": 0.001 },
+    "horizontalMovement": { "damping": 0.9, "stiffness": 800, "mass": 1.0, "epsilon": 0.001 },
+    "windowResize": { "damping": 0.8, "stiffness": 500, "mass": 1.0, "epsilon": 0.001 }
+  },
+  "input": {
+    "scrollThreshold": 25,
+    "scrollMultiplier": 1.5,
+    "triggerCooldown": 0.15
+  },
+  "windowRules": [
+    {
+      "matchers": [{ "type": "app-id", "value": "com.apple.systempreferences" }],
+      "actions": [{ "type": "float" }]
     }
-    
-    default-column-width { proportion 0.5; }
-    
-    focus-ring {
-        width 2
-        color "#7aa2f7"
-    }
-}
-
-animations {
-    workspace-switch {
-        spring damping-ratio=0.8 stiffness=500 epsilon=0.001
-    }
-    horizontal-view-movement {
-        spring damping-ratio=0.9 stiffness=800 epsilon=0.001
-    }
-    window-resize {
-        spring damping-ratio=0.8 stiffness=500 epsilon=0.001
-    }
-}
-
-input {
-    trackpad {
-        scroll-factor 0.5
-        natural-scroll true
-    }
-}
-
-window-rules {
-    // Float certain windows
-    match app-id="com.apple.systempreferences" {
-        floating true
-    }
-    match title~"^Preferences$" {
-        floating true
-    }
+  ]
 }
 ```
+
+`centerFocusedColumn` options: `"never"`, `"always"`, `"on-overflow"`
 
 ## Gestures & Scroll Controls
 
@@ -325,20 +327,31 @@ niri-msg quit                       # Quit niri-macos daemon
 
 ## Current Status
 
-🔧 **Functional Prototype** 🔧
+**Working**
 
-- [x] Project structure
-- [x] Basic window enumeration
-- [x] Accessibility API integration (AXWindowObserver)
-- [x] Horizontal layout engine
-- [x] Scroll state management
-- [x] Gesture recognition (trackpad swipe)
-- [x] Animation system (spring physics)
-- [x] IPC server (Unix socket)
+- [x] Project structure (NiriCore library + executables)
+- [x] Window enumeration (CGWindowList + Accessibility APIs)
+- [x] AXWindowObserver (event-driven window tracking)
+- [x] Horizontal layout engine (scrollable columns)
+- [x] Scroll state management + animated scrolling
+- [x] Gesture recognition (trackpad swipe, modifier+scroll)
+- [x] Animation system (spring physics, CVDisplayLink 60fps)
+- [x] IPC server (Unix socket, JSON protocol)
 - [x] Complete niri-msg CLI
-- [ ] Configuration system (KDL)
+- [x] Configuration system (JSON)
+- [x] Multi-monitor support (per-monitor isolation)
+- [x] Workspace operations (up/down/create above/below)
+- [x] Split group layouts (horizontal/vertical/quad)
+- [x] Test suite (112 tests)
+- [x] CI (GitHub Actions)
+
+**Planned**
+
 - [ ] Focus ring overlay
-- [ ] Window rules
+- [ ] Window rule enforcement (float, fixed width, workspace assignment)
+- [ ] Overview mode
+- [ ] Sketchybar integration
+- [ ] Homebrew formula
 
 ### Permissions Required
 

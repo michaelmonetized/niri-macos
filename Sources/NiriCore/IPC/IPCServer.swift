@@ -2,11 +2,11 @@ import Foundation
 import AppKit
 
 /// Unix domain socket IPC server for external control
-class IPCServer {
-    static let shared = IPCServer()
+public class IPCServer {
+    public static let shared = IPCServer()
     
     private let logger = Logger.shared
-    private let socketPath = "/tmp/niri-macos.sock"
+    public var socketPath: String = Constants.defaultSocketPath
     private var serverSocket: Int32 = -1
     private var isRunning = false
     private var clientHandlers: [Int32: Thread] = [:]
@@ -15,7 +15,7 @@ class IPCServer {
     
     // MARK: - Server Lifecycle
     
-    func start() {
+    public func start() {
         guard !isRunning else { return }
         
         // Remove existing socket file
@@ -65,7 +65,7 @@ class IPCServer {
         }
     }
     
-    func stop() {
+    public func stop() {
         isRunning = false
         
         if serverSocket >= 0 {
@@ -113,7 +113,7 @@ class IPCServer {
         }
         
         // Read request
-        var buffer = [CChar](repeating: 0, count: 4096)
+        var buffer = [CChar](repeating: 0, count: Constants.socketBufferSize)
         let bytesRead = read(socket, &buffer, buffer.count - 1)
         
         guard bytesRead > 0 else {
@@ -123,9 +123,12 @@ class IPCServer {
         buffer[bytesRead] = 0
         let requestString = String(cString: buffer)
         
-        // Process request
-        let response = processRequest(requestString)
-        
+        // Process request on main thread (LayoutEngine is main-thread-only)
+        var response = ""
+        DispatchQueue.main.sync {
+            response = self.processRequest(requestString)
+        }
+
         // Send response
         let responseData = response.data(using: .utf8) ?? Data()
         _ = responseData.withUnsafeBytes { ptr in
@@ -162,11 +165,9 @@ class IPCServer {
         case .focusColumnRight:
             engine.focusColumnRight()
         case .focusColumnFirst:
-            // Focus first column by scrolling to beginning
-            engine.scroll(by: -10000)  // Large scroll to beginning
+            engine.focusColumnFirst()
         case .focusColumnLast:
-            // Focus last column by scrolling to end
-            engine.scroll(by: 10000)  // Large scroll to end
+            engine.focusColumnLast()
         case .focusWindowUp:
             engine.focusWindowUp()
         case .focusWindowDown:
@@ -222,12 +223,16 @@ class IPCServer {
                 return IPCResponse(success: false, error: "Missing workspace index", data: nil)
             }
         case .workspaceUp:
+            logger.info("IPC: workspace-up")
             engine.workspaceUp()
         case .workspaceDown:
+            logger.info("IPC: workspace-down")
             engine.workspaceDown()
         case .createWorkspaceAbove:
+            logger.info("IPC: create-workspace-above triggered!")
             engine.createWorkspaceAbove()
         case .createWorkspaceBelow:
+            logger.info("IPC: create-workspace-below triggered!")
             engine.createWorkspaceBelow()
             
         case .toggleFullscreen:

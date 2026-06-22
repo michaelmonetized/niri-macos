@@ -64,14 +64,19 @@ Complete reference for all input controls.
 | `Alt+U` | `workspace-up` | Switch to previous workspace |
 | `Alt+D` | `workspace-down` | Switch to next workspace |
 
-### Workspace Creation (Meh Key)
+### Workspace Creation (Meh Key / Hyper Key)
 
-**Meh key** = `Ctrl+Option+Shift`
+**Meh key** = `Ctrl+Option+Shift` (3 modifiers)
+**Hyper key** = `Ctrl+Option+Cmd+Shift` (4 modifiers)
+
+Both work for workspace creation:
 
 | Shortcut | Command | Description |
 |----------|---------|-------------|
-| `Meh+K` / `Meh+Up` | `create-workspace-above` | Create workspace above current |
-| `Meh+J` / `Meh+Down` | `create-workspace-below` | Create workspace below current |
+| `Meh+K` / `Hyper+K` | `create-workspace-above` | Create workspace above current |
+| `Meh+J` / `Hyper+J` | `create-workspace-below` | Create workspace below current |
+| `Meh+Up` / `Hyper+Up` | `create-workspace-above` | Create workspace above current |
+| `Meh+Down` / `Hyper+Down` | `create-workspace-below` | Create workspace below current |
 
 ### Split Groups
 
@@ -133,11 +138,17 @@ alt + shift - 3 : niri-msg move-window-to-workspace 3
 alt - u : niri-msg workspace-up
 alt - d : niri-msg workspace-down
 
-# Create workspaces (Meh key)
+# Create workspaces (Meh key = Ctrl+Alt+Shift)
 ctrl + alt + shift - k : niri-msg create-workspace-above
 ctrl + alt + shift - j : niri-msg create-workspace-below
 ctrl + alt + shift - up : niri-msg create-workspace-above
 ctrl + alt + shift - down : niri-msg create-workspace-below
+
+# Create workspaces (Hyper key = Ctrl+Alt+Cmd+Shift = MEH + Cmd)
+ctrl + alt + cmd + shift - k : niri-msg create-workspace-above
+ctrl + alt + cmd + shift - j : niri-msg create-workspace-below
+ctrl + alt + cmd + shift - up : niri-msg create-workspace-above
+ctrl + alt + cmd + shift - down : niri-msg create-workspace-below
 
 # Split groups
 ctrl + alt - s : niri-msg create-split-horizontal

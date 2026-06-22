@@ -3,8 +3,8 @@ import CoreGraphics
 import AppKit
 
 /// Controls window positions and sizes using Accessibility APIs
-class WindowController {
-    static let shared = WindowController()
+public class WindowController: WindowManipulating {
+    public static let shared = WindowController()
     private let logger = Logger.shared
     private let enumerator = WindowEnumerator.shared
     
@@ -17,7 +17,8 @@ class WindowController {
     // MARK: - Window Manipulation
     
     /// Move a window to a new position
-    func setWindowPosition(_ windowID: WindowID, position: CGPoint) -> Bool {
+    @discardableResult
+    public func setWindowPosition(_ windowID: WindowID, position: CGPoint) -> Bool {
         guard let window = enumerator.getWindow(id: windowID),
               let axWindow = getAXWindow(for: window) else {
             logger.error("Cannot find window \(windowID) for position change")
@@ -25,7 +26,10 @@ class WindowController {
         }
         
         var pos = position
-        let positionValue = AXValueCreate(.cgPoint, &pos)!
+        guard let positionValue = AXValueCreate(.cgPoint, &pos) else {
+            logger.error("Failed to create AXValue for position of window \(windowID)")
+            return false
+        }
         let result = AXUIElementSetAttributeValue(axWindow, kAXPositionAttribute as CFString, positionValue)
         
         if result != .success {
@@ -37,7 +41,8 @@ class WindowController {
     }
     
     /// Resize a window
-    func setWindowSize(_ windowID: WindowID, size: CGSize) -> Bool {
+    @discardableResult
+    public func setWindowSize(_ windowID: WindowID, size: CGSize) -> Bool {
         guard let window = enumerator.getWindow(id: windowID),
               let axWindow = getAXWindow(for: window) else {
             logger.error("Cannot find window \(windowID) for size change")
@@ -45,7 +50,10 @@ class WindowController {
         }
         
         var sz = size
-        let sizeValue = AXValueCreate(.cgSize, &sz)!
+        guard let sizeValue = AXValueCreate(.cgSize, &sz) else {
+            logger.error("Failed to create AXValue for size of window \(windowID)")
+            return false
+        }
         let result = AXUIElementSetAttributeValue(axWindow, kAXSizeAttribute as CFString, sizeValue)
         
         if result != .success {
@@ -57,7 +65,8 @@ class WindowController {
     }
     
     /// Move and resize a window in one operation
-    func setWindowFrame(_ windowID: WindowID, frame: CGRect) -> Bool {
+    @discardableResult
+    public func setWindowFrame(_ windowID: WindowID, frame: CGRect) -> Bool {
         // Set position first, then size (order matters for some apps)
         let posOk = setWindowPosition(windowID, position: frame.origin)
         let sizeOk = setWindowSize(windowID, size: frame.size)
@@ -65,7 +74,8 @@ class WindowController {
     }
     
     /// Focus a window (bring to front and give keyboard focus)
-    func focusWindow(_ windowID: WindowID) -> Bool {
+    @discardableResult
+    public func focusWindow(_ windowID: WindowID) -> Bool {
         guard let window = enumerator.getWindow(id: windowID),
               let axWindow = getAXWindow(for: window) else {
             logger.error("Cannot find window \(windowID) for focus")
@@ -93,7 +103,8 @@ class WindowController {
     }
     
     /// Minimize a window
-    func minimizeWindow(_ windowID: WindowID) -> Bool {
+    @discardableResult
+    public func minimizeWindow(_ windowID: WindowID) -> Bool {
         guard let window = enumerator.getWindow(id: windowID),
               let axWindow = getAXWindow(for: window) else {
             return false
@@ -104,7 +115,8 @@ class WindowController {
     }
     
     /// Unminimize (restore) a window
-    func unminimizeWindow(_ windowID: WindowID) -> Bool {
+    @discardableResult
+    public func unminimizeWindow(_ windowID: WindowID) -> Bool {
         guard let window = enumerator.getWindow(id: windowID),
               let axWindow = getAXWindow(for: window) else {
             return false
@@ -149,19 +161,21 @@ class WindowController {
             
             if AXUIElementCopyAttributeValue(axWindow, kAXPositionAttribute as CFString, &positionRef) == .success,
                let posValue = positionRef {
-                AXValueGetValue(posValue as! AXValue, .cgPoint, &position)
+                // CFTypeRef -> AXValue cast always succeeds for position attributes
+                let posAXValue = unsafeBitCast(posValue, to: AXValue.self)
+                AXValueGetValue(posAXValue, .cgPoint, &position)
             }
             
             if AXUIElementCopyAttributeValue(axWindow, kAXSizeAttribute as CFString, &sizeRef) == .success,
                let sizeValue = sizeRef {
-                AXValueGetValue(sizeValue as! AXValue, .cgSize, &size)
+                // CFTypeRef -> AXValue cast always succeeds for size attributes
+                let sizeAXValue = unsafeBitCast(sizeValue, to: AXValue.self)
+                AXValueGetValue(sizeAXValue, .cgSize, &size)
             }
             
-            // Match by approximate position (allow small differences)
-            if abs(position.x - window.frame.origin.x) < 5 &&
-               abs(position.y - window.frame.origin.y) < 5 &&
-               abs(size.width - window.frame.width) < 5 &&
-               abs(size.height - window.frame.height) < 5 {
+            // Match by approximate frame
+            let axFrame = CGRect(origin: position, size: size)
+            if WindowEnumerator.framesMatch(axFrame, window.frame) {
                 axWindowCache[window.id] = axWindow
                 return axWindow
             }
@@ -178,7 +192,7 @@ class WindowController {
     }
     
     /// Clear cached AX references (call when apps quit)
-    func clearCache(for pid: pid_t? = nil) {
+    public func clearCache(for pid: pid_t? = nil) {
         if let pid = pid {
             axAppCache.removeValue(forKey: pid)
             // Remove windows belonging to this app
@@ -196,7 +210,7 @@ class WindowController {
     // MARK: - Batch Operations
     
     /// Move multiple windows at once (more efficient)
-    func batchSetFrames(_ frames: [(WindowID, CGRect)]) {
+    public func batchSetFrames(_ frames: [(WindowID, CGRect)]) {
         for (windowID, frame) in frames {
             _ = setWindowFrame(windowID, frame: frame)
         }

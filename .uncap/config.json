@@ -1,0 +1,19 @@
+{
+  "repoId": "r17ctefrzdg3x437c1fyhn8d0x87nxh2",
+  "owner": "uncap_user",
+  "name": "niri-macos",
+  "originType": "native",
+  "legacy": {
+    "hasGitHub": true,
+    "hasGit": true
+  },
+  "defaults": {
+    "file": "public",
+    "fragment": "public",
+    "issue": "public",
+    "pullRequest": "public",
+    "branch": "public",
+    "comment": "public"
+  },
+  "headSha": ""
+}

@@ -7,23 +7,12 @@ let package = Package(
     products: [
         .executable(name: "niri-macos", targets: ["niri-macos"]),
         .executable(name: "niri-msg", targets: ["niri-msg"]),
+        .library(name: "NiriCore", targets: ["NiriCore"]),
     ],
     targets: [
-        .executableTarget(
-            name: "niri-macos",
-            path: "Sources/niri-macos",
-            sources: [
-                "main.swift",
-                "Logger.swift",
-                "Core/Types.swift",
-                "Core/AnimationController.swift",
-                "Window/WindowEnumerator.swift",
-                "Window/WindowController.swift",
-                "Window/AXObserver.swift",
-                "Layout/LayoutEngine.swift",
-                "Input/GestureRecognizer.swift",
-                "IPC/IPCServer.swift",
-            ],
+        .target(
+            name: "NiriCore",
+            path: "Sources/NiriCore",
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedFramework("CoreGraphics"),
@@ -31,9 +20,20 @@ let package = Package(
             ]
         ),
         .executableTarget(
+            name: "niri-macos",
+            dependencies: ["NiriCore"],
+            path: "Sources/niri-macos",
+            sources: ["main.swift"]
+        ),
+        .executableTarget(
             name: "niri-msg",
             path: "Sources/niri-msg",
             sources: ["main.swift"]
-        )
+        ),
+        .testTarget(
+            name: "NiriCoreTests",
+            dependencies: ["NiriCore"],
+            path: "Tests/NiriCoreTests"
+        ),
     ]
 )
