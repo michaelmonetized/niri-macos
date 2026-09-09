@@ -193,38 +193,37 @@ class AnimationController {
 
 ---
 
-## Phase 6: Configuration
+## Phase 6: Configuration ✅ (JSON at HEAD)
 **Goal:** User-configurable behavior
 
 ### 6.1 Config Format
-- [ ] KDL format (like niri)
-- [ ] Or TOML for simplicity
+- [x] **JSON** config at `~/.config/niri-macos/config.json` (`ConfigManager.swift`)
+- [x] Codable decode path + tests (`ConfigCodableTests`)
 - [ ] Live reload on file change
+- [ ] ~~KDL format (like upstream niri)~~ **Not shipped** — HEAD parser is JSON, not KDL. KDL remains a possible future, not current.
 
 ### 6.2 Config Options
-```kdl
-layout {
-    gaps 16
-    center-focused-column "on-overflow"
-    preset-column-widths { 0.33; 0.5; 0.66; 1.0 }
-    default-column-width 0.5
-}
-
-animations {
-    enabled true
-    spring { damping 0.8; stiffness 500 }
-}
-
-window-rules {
-    match app-id="com.apple.finder" { floating true }
+Shipped shape is JSON (illustrative):
+```json
+{
+  "layout": {
+    "gaps": 16,
+    "defaultColumnWidth": 0.5
+  },
+  "animations": {
+    "enabled": true
+  },
+  "windowRules": [
+    { "appId": "com.apple.finder", "floating": true }
+  ]
 }
 ```
 
 ### 6.3 Window Rules
-- [ ] Match by app-id, title regex
-- [ ] Actions: float, fixed-size, workspace assignment
+- [x] Parsed / Codable window-rule path exists
+- [ ] Enforcement applied to live layout (sitrep: parsed but not fully applied)
 
-**Deliverable:** Customizable via config file
+**Deliverable:** Customizable via JSON config file ✅ (enforcement of rules still open)
 
 ---
 
@@ -317,3 +316,6 @@ Multiple systems trying to move windows:
 - [niri source](https://github.com/YaLTeR/niri) - Layout algorithms
 - [AXUIElement docs](https://developer.apple.com/documentation/applicationservices/axuielement_h)
 - [CGWindow docs](https://developer.apple.com/documentation/coregraphics/quartz_window_services)
+
+
+*PLAN parity sync: 2026-09-08 — Phase 6 aligned to JSON HEAD.*
